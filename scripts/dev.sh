@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HTTP_ADDR="${SHORTWARDEN_HTTP_ADDR:-:8080}"
+PUBLIC_BASE_URL="${SHORTWARDEN_PUBLIC_BASE_URL:-http://localhost:8080}"
+POSTGRES_DSN="${SHORTWARDEN_POSTGRES_DSN:-postgres://shortwarden:shortwarden@localhost:5432/shortwarden?sslmode=disable}"
+JWT_SECRET="${SHORTWARDEN_JWT_SECRET:-dev-secret-change-me}"
+
+export SHORTWARDEN_HTTP_ADDR="$HTTP_ADDR"
+export SHORTWARDEN_PUBLIC_BASE_URL="$PUBLIC_BASE_URL"
+export SHORTWARDEN_POSTGRES_DSN="$POSTGRES_DSN"
+export SHORTWARDEN_JWT_SECRET="$JWT_SECRET"
+export SHORTWARDEN_COOKIE_SECURE="${SHORTWARDEN_COOKIE_SECURE:-0}"
+
+go run ./cmd/shortwarden
+

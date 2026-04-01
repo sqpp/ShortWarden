@@ -1,0 +1,1090 @@
+openapi: 3.0.3
+info:
+  title: ShortWarden API
+  version: 0.1.0
+  description: |
+    ShortWarden is a URL shortening service with user accounts, API keys for integrations,
+    custom aliases, expiring links, click analytics, and domain management with DNS TXT verification.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Auth
+    description: User authentication and session endpoints
+  - name: Users
+    description: User profile and (optional) admin user management
+  - name: ApiKeys
+    description: API keys for integrations
+  - name: Links
+    description: Link creation and management
+  - name: Redirect
+    description: Public redirect endpoints
+  - name: Analytics
+    description: Click analytics and raw click events
+  - name: Domains
+    description: Managed domains for shortening (primary + additional)
+  - name: ImportExport
+    description: Import and export of links
+  - name: Tags
+    description: Tag management and tag browsing
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      description: Returns ok when the service is running.
+      operationId: healthz
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a user
+      description: Creates a new user account with email and password.
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: |
+        Authenticates a user with email/password.
+
+        For browser clients, this sets a JWT session cookie (HttpOnly). For non-cookie clients,
+        the response can also include a token in the JSON body.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: OK
+          headers:
+            Set-Cookie:
+              description: HttpOnly session cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout
+      description: Clears the session cookie for browser clients.
+      operationId: logout
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      responses:
+        "204":
+          description: No Content
+
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh session
+      description: Rotates or refreshes the session cookie.
+      operationId: refresh
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: OK
+          headers:
+            Set-Cookie:
+              description: Refreshed session cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+
+  /v1/auth/csrf:
+    get:
+      tags: [Auth]
+      summary: Get CSRF token
+      description: Returns a CSRF token for browser state-changing requests (if enabled).
+      operationId: csrf
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CsrfResponse"
+
+  /v1/me:
+    get:
+      tags: [Users]
+      summary: Get current user
+      description: Returns the current authenticated user's profile.
+      operationId: getMe
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/api-keys:
+    get:
+      tags: [ApiKeys]
+      summary: List API keys
+      description: Lists API keys for the authenticated user (does not return raw keys).
+      operationId: listApiKeys
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiKey"
+    post:
+      tags: [ApiKeys]
+      summary: Create API key
+      description: Creates a new API key for integrations. The raw key is returned only once.
+      operationId: createApiKey
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiKeyRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateApiKeyResponse"
+
+  /v1/api-keys/{id}:
+    delete:
+      tags: [ApiKeys]
+      summary: Revoke API key
+      description: Revokes an API key by id.
+      operationId: revokeApiKey
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKey"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/api-keys/{id}/domains:
+    get:
+      tags: [ApiKeys]
+      summary: List allowed domains for API key
+      description: Returns the list of domain IDs this API key is restricted to. Empty means unrestricted.
+      operationId: listApiKeyDomains
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [ApiKeys]
+      summary: Replace allowed domains for API key
+      description: Replaces the allowed domain IDs for this API key. Empty array means unrestricted.
+      operationId: replaceApiKeyDomains
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+                format: uuid
+      responses:
+        "204":
+          description: No Content
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/domains:
+    get:
+      tags: [Domains]
+      summary: List domains
+      description: Lists the authenticated user's domains.
+      operationId: listDomains
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Domain"
+    post:
+      tags: [Domains]
+      summary: Add domain
+      description: |
+        Adds a domain to the user's account. The domain starts in pending status.
+
+        The response includes the `dns_token` and the required TXT record details to verify ownership.
+      operationId: createDomain
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDomainRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateDomainResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/domains/{id}/verify:
+    post:
+      tags: [Domains]
+      summary: Verify domain
+      description: Verifies the domain via DNS TXT lookup and marks it as verified.
+      operationId: verifyDomain
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Domain"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/domains/{id}/primary:
+    post:
+      tags: [Domains]
+      summary: Set primary domain
+      description: Sets a verified domain as the primary shortening domain for the user.
+      operationId: setPrimaryDomain
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "204":
+          description: No Content
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/domains/{id}:
+    delete:
+      tags: [Domains]
+      summary: Delete domain
+      description: Deletes a domain from the user's account.
+      operationId: deleteDomain
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "204":
+          description: No Content
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/domains/{id}/default-tags:
+    put:
+      tags: [Domains]
+      summary: Replace domain default tags
+      description: Replaces the default tags for a domain. These tags are applied to new links when tags are omitted.
+      operationId: replaceDomainDefaultTags
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Domain"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/links:
+    get:
+      tags: [Links]
+      summary: List links
+      description: Lists the authenticated user's links.
+      operationId: listLinks
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: include_deleted
+          in: query
+          description: Include soft-deleted links.
+          schema: { type: boolean, default: false }
+        - name: tag
+          in: query
+          description: Optional tag filter (only links containing this tag).
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Link" }
+    post:
+      tags: [Links]
+      summary: Create link
+      description: Creates a short link with an optional custom alias and optional expiry.
+      operationId: createLink
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLinkRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Link"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/tags:
+    get:
+      tags: [Tags]
+      summary: List tags
+      description: Lists tags (curated + derived counts from links).
+      operationId: listTags
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tag"
+    post:
+      tags: [Tags]
+      summary: Create tag
+      description: Creates a curated tag for the authenticated user.
+      operationId: createTag
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTagRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/tags/{name}:
+    delete:
+      tags: [Tags]
+      summary: Delete tag
+      description: Deletes a curated tag for the authenticated user.
+      operationId: deleteTag
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: No Content
+
+  /v1/me/password:
+    post:
+      tags: [Users]
+      summary: Change password
+      description: Changes the current user's password.
+      operationId: changePassword
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: No Content
+
+  /v1/me/settings:
+    get:
+      tags: [Users]
+      summary: Get settings
+      operationId: getSettings
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSettings"
+    patch:
+      tags: [Users]
+      summary: Update settings
+      operationId: updateSettings
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserSettingsRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSettings"
+  /v1/links/{id}:
+    get:
+      tags: [Links]
+      summary: Get link
+      description: Gets a link by id (must belong to the authenticated user).
+      operationId: getLink
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Link"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Links]
+      summary: Update link
+      description: Updates a link's target, alias, expiry, tags, or domain.
+      operationId: updateLink
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLinkRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Link"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Links]
+      summary: Delete link
+      description: Soft-deletes a link.
+      operationId: deleteLink
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Link"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/links/{id}/analytics:
+    get:
+      tags: [Analytics]
+      summary: Link analytics summary
+      description: Returns aggregated click counts by day for a given time range.
+      operationId: getLinkAnalytics
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnalytics"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/links/{id}/clicks:
+    get:
+      tags: [Analytics]
+      summary: Link click events
+      description: Returns raw click events for a link (paginated).
+      operationId: listLinkClicks
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ClickEvent" }
+
+  /v1/links/export:
+    get:
+      tags: [ImportExport]
+      summary: Export links
+      description: Exports links for the authenticated user. Supports JSON or CSV via the Accept header.
+      operationId: exportLinks
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: format
+          in: query
+          description: Optional explicit format override.
+          schema:
+            type: string
+            enum: [json, csv]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LinkExport" }
+            text/csv:
+              schema:
+                type: string
+
+  /v1/links/import:
+    post:
+      tags: [ImportExport]
+      summary: Import links
+      description: Imports links for the authenticated user from JSON or CSV. Supports dry-run validation.
+      operationId: importLinks
+      security:
+        - CookieAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: dry_run
+          in: query
+          schema: { type: boolean, default: false }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/LinkImport"
+          text/csv:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /r/{alias}:
+    get:
+      tags: [Redirect]
+      summary: Redirect by alias
+      description: Resolves an alias and redirects to the target URL (records a click event).
+      operationId: redirect
+      parameters:
+        - name: alias
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: Redirect
+          headers:
+            Location:
+              schema:
+                type: string
+              description: Target URL
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: sw_session
+      description: HttpOnly session cookie set by login.
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: |
+        API key authentication. Use: `Authorization: ApiKey <key>`.
+
+  parameters:
+    IdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Tag:
+      type: object
+      required: [name, link_count]
+      properties:
+        name: { type: string }
+        link_count: { type: integer, format: int64 }
+        curated:
+          type: boolean
+          description: Whether this tag was explicitly created by the user.
+
+    CreateTagRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string }
+        new_password: { type: string, minLength: 8 }
+
+    UserSettings:
+      type: object
+      required: [redirect_delay_seconds, keep_expired_links, timezone]
+      properties:
+        redirect_delay_seconds: { type: integer, minimum: 0, maximum: 30 }
+        keep_expired_links: { type: boolean }
+        timezone: { type: string }
+
+    UpdateUserSettingsRequest:
+      type: object
+      required: [redirect_delay_seconds, keep_expired_links, timezone]
+      properties:
+        redirect_delay_seconds: { type: integer, minimum: 0, maximum: 30 }
+        keep_expired_links: { type: boolean }
+        timezone: { type: string }
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+
+    User:
+      type: object
+      required: [id, email, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        created_at: { type: string, format: date-time }
+        disabled_at: { type: string, format: date-time, nullable: true }
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    LoginResponse:
+      type: object
+      required: [user]
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        token:
+          description: Optional bearer token for non-cookie clients.
+          type: string
+          nullable: true
+
+    CsrfResponse:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+
+    ApiKey:
+      type: object
+      required: [id, name, created_at, revoked_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+
+    CreateApiKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+
+    CreateApiKeyResponse:
+      type: object
+      required: [api_key, raw_key]
+      properties:
+        api_key: { $ref: "#/components/schemas/ApiKey" }
+        raw_key:
+          type: string
+          description: Only returned once. Store securely.
+
+    Domain:
+      type: object
+      required: [id, hostname, is_primary, status, dns_token, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        hostname: { type: string }
+        is_primary: { type: boolean }
+        status: { type: string, enum: [pending, verified] }
+        dns_token: { type: string }
+        created_at: { type: string, format: date-time }
+        verified_at: { type: string, format: date-time, nullable: true }
+
+    CreateDomainRequest:
+      type: object
+      required: [hostname]
+      properties:
+        hostname:
+          type: string
+          description: Domain hostname (no scheme/path), e.g. `example.com` or `go.example.com`.
+
+    CreateDomainResponse:
+      type: object
+      required: [domain, txt_name, txt_value]
+      properties:
+        domain: { $ref: "#/components/schemas/Domain" }
+        txt_name:
+          type: string
+          description: TXT record name to create.
+        txt_value:
+          type: string
+          description: TXT record value to create (the dns_token).
+
+    Link:
+      type: object
+      required: [id, alias, target_url, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        domain_id: { type: string, format: uuid, nullable: true }
+        alias: { type: string }
+        target_url: { type: string, format: uri }
+        title: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time, nullable: true }
+        deleted_at: { type: string, format: date-time, nullable: true }
+        short_url:
+          type: string
+          description: Convenience field with full short URL (domain + /r/alias).
+
+    CreateLinkRequest:
+      type: object
+      required: [target_url]
+      properties:
+        domain_id: { type: string, format: uuid, nullable: true }
+        alias:
+          type: string
+          nullable: true
+          description: Optional custom alias.
+        target_url: { type: string, format: uri }
+        title: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+
+    UpdateLinkRequest:
+      type: object
+      required: [target_url]
+      properties:
+        domain_id: { type: string, format: uuid, nullable: true }
+        alias:
+          type: string
+          nullable: true
+          description: Optional new alias.
+        target_url: { type: string, format: uri }
+        title: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+
+    ClickEvent:
+      type: object
+      required: [id, clicked_at]
+      properties:
+        id: { type: integer, format: int64 }
+        clicked_at: { type: string, format: date-time }
+        referrer: { type: string, nullable: true }
+        user_agent: { type: string, nullable: true }
+        ip: { type: string, nullable: true }
+        country: { type: string, nullable: true }
+        device: { type: string, nullable: true }
+
+    LinkAnalyticsDay:
+      type: object
+      required: [day, clicks]
+      properties:
+        day: { type: string, format: date-time }
+        clicks: { type: integer, format: int64 }
+
+    LinkAnalytics:
+      type: object
+      required: [from, to, days]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        days:
+          type: array
+          items: { $ref: "#/components/schemas/LinkAnalyticsDay" }
+
+    LinkExport:
+      type: object
+      required: [alias, target_url]
+      properties:
+        domain_hostname: { type: string, nullable: true }
+        alias: { type: string }
+        target_url: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+        title: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+
+    LinkImport:
+      type: object
+      required: [alias, target_url]
+      properties:
+        domain_hostname: { type: string, nullable: true }
+        alias: { type: string }
+        target_url: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+        title: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+
+    ImportResult:
+      type: object
+      required: [created, skipped, errors]
+      properties:
+        created: { type: integer }
+        skipped: { type: integer }
+        errors:
+          type: array
+          items: { type: string }
+

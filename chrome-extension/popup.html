@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ShortWarden</title>
+    <style>
+      body { font-family: system-ui, Segoe UI, sans-serif; margin: 0; padding: 12px; width: 360px; }
+      label { display: block; font-size: 12px; font-weight: 600; margin-top: 10px; }
+      input { width: 100%; padding: 8px; margin-top: 6px; box-sizing: border-box; }
+      button { width: 100%; margin-top: 12px; padding: 10px; }
+      .msg { margin-top: 10px; font-size: 12px; white-space: pre-wrap; }
+      .row { display: flex; gap: 8px; }
+      .row > * { flex: 1; }
+      .small { font-size: 12px; color: #555; }
+      code { background: #f3f4f6; padding: 2px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <div class="small">
+      Needs an API key. Configure in <code>Options</code>.
+    </div>
+
+    <label>URL</label>
+    <input id="url" />
+
+    <div class="row">
+      <div>
+        <label>Alias (optional)</label>
+        <input id="alias" placeholder="my-alias" />
+      </div>
+      <div>
+        <label>Expiry</label>
+        <select id="expiryPreset" style="width:100%;padding:8px;margin-top:6px;box-sizing:border-box;">
+          <option value="">No expiry</option>
+          <option value="5m">5 minutes</option>
+          <option value="15m">15 minutes</option>
+          <option value="30m">30 minutes</option>
+          <option value="1h">1 hour</option>
+          <option value="6h">6 hours</option>
+          <option value="24h">24 hours</option>
+          <option value="3d">3 days</option>
+          <option value="7d">7 days</option>
+          <option value="1mo">1 month</option>
+          <option value="custom">Custom (RFC3339)</option>
+        </select>
+        <input id="expires" placeholder="2026-12-31T00:00:00Z" style="display:none;" />
+      </div>
+    </div>
+
+    <button id="shorten">Create short link</button>
+    <button id="openApp">Open ShortWarden</button>
+    <button id="openOptions">Open Options</button>
+
+    <div id="msg" class="msg"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>
+

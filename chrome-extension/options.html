@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ShortWarden Options</title>
+    <style>
+      body { font-family: system-ui, Segoe UI, sans-serif; padding: 16px; max-width: 720px; }
+      label { display: block; font-weight: 600; margin-top: 12px; }
+      input { width: 100%; padding: 8px; margin-top: 6px; }
+      button { margin-top: 12px; padding: 8px 12px; }
+      .row { display: flex; gap: 8px; }
+      .row > * { flex: 1; }
+      .msg { margin-top: 12px; white-space: pre-wrap; }
+      code { background: #f3f4f6; padding: 2px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>ShortWarden</h1>
+    <p>
+      Configure API access. Create an API key in the web UI under <code>/app/api-keys</code>.
+    </p>
+
+    <label>API base URL</label>
+    <input id="baseUrl" placeholder="http://localhost:8080" />
+
+    <label>API key</label>
+    <input id="apiKey" placeholder="sw_..." />
+
+    <div class="row">
+      <button id="save">Save</button>
+      <button id="test">Test</button>
+    </div>
+
+    <div id="msg" class="msg"></div>
+
+    <script src="options.js"></script>
+  </body>
+</html>
+

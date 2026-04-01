@@ -1,0 +1,25 @@
+FROM golang:1.25-alpine AS build
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/shortwarden ./cmd/shortwarden
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/migrate ./cmd/migrate
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/cleanup ./cmd/cleanup
+
+FROM alpine:3.21
+RUN adduser -D -H -u 10001 appuser
+USER appuser
+
+WORKDIR /app
+COPY --from=build /out/shortwarden /app/shortwarden
+COPY --from=build /out/migrate /app/migrate
+COPY --from=build /out/cleanup /app/cleanup
+COPY api/openapi.yaml /app/api/openapi.yaml
+COPY db/migrations /app/db/migrations
+
+EXPOSE 8080
+ENTRYPOINT ["/app/shortwarden"]
+

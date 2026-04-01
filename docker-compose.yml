@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: shortwarden
+      POSTGRES_PASSWORD: shortwarden
+      POSTGRES_DB: shortwarden
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shortwarden -d shortwarden"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - shortwarden_pgdata:/var/lib/postgresql/data
+
+volumes:
+  shortwarden_pgdata:
+

@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}
+
+@layer components {
+  .sw-shell {
+    @apply min-h-screen bg-slate-950 text-slate-100;
+  }
+  .sw-sidebar {
+    @apply w-72 shrink-0 border-r border-slate-800 bg-slate-950;
+  }
+  .sw-sidebar-header {
+    @apply flex items-center gap-2 border-b border-slate-800 px-4 py-4;
+  }
+  .sw-brand {
+    @apply text-sm font-semibold tracking-wide text-slate-100;
+  }
+  .sw-nav {
+    @apply px-2 py-3 text-sm;
+  }
+  .sw-nav-link {
+    @apply flex items-center gap-2 rounded-lg px-3 py-2 text-slate-300 hover:bg-slate-900 hover:text-slate-100;
+  }
+  .sw-nav-link.router-link-active {
+    @apply bg-slate-900 text-slate-100;
+  }
+  .sw-content {
+    @apply flex min-w-0 flex-1 flex-col;
+  }
+  .sw-topbar {
+    @apply flex items-center justify-between gap-4 border-b border-slate-800 bg-slate-950 px-6 py-4;
+  }
+  .sw-page {
+    @apply px-6 py-6;
+  }
+  .sw-title {
+    @apply text-xl font-semibold text-slate-100;
+  }
+  .sw-subtitle {
+    @apply mt-1 text-sm text-slate-400;
+  }
+
+  .sw-card {
+    @apply rounded-xl border border-slate-800 bg-slate-950/40;
+  }
+  .sw-card-body {
+    @apply p-4;
+  }
+  .sw-card-header {
+    @apply border-b border-slate-800 px-4 py-3 text-sm font-medium text-slate-100;
+  }
+
+  .sw-input {
+    @apply w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-700;
+  }
+  .sw-select {
+    @apply w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-700;
+  }
+  .sw-label {
+    @apply text-xs font-medium uppercase tracking-wide text-slate-400;
+  }
+
+  .sw-btn {
+    @apply inline-flex items-center justify-center rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50;
+  }
+  .sw-btn-primary {
+    @apply border-slate-600 bg-slate-100 text-slate-950 hover:bg-white;
+  }
+  .sw-btn-danger {
+    @apply border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-950/50;
+  }
+
+  .sw-table {
+    @apply w-full text-left text-sm;
+  }
+  .sw-thead {
+    @apply border-b border-slate-800 text-xs font-medium uppercase tracking-wide text-slate-400;
+  }
+  .sw-row {
+    @apply border-b border-slate-900/70 hover:bg-slate-900/40;
+  }
+  .sw-muted {
+    @apply text-slate-400;
+  }
+  .sw-error {
+    @apply rounded-md border border-red-900/60 bg-red-950/30 p-3 text-sm text-red-200;
+  }
+}
+

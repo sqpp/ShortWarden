@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "ShortWarden",
+  "version": "0.1.0",
+  "description": "Create ShortWarden short links from your browser.",
+  "permissions": ["activeTab", "storage", "contextMenus", "clipboardWrite", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* https: http:"
+  },
+  "action": {
+    "default_title": "ShortWarden",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js"
+  }
+}
+
