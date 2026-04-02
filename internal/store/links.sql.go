@@ -167,6 +167,84 @@ func (q *Queries) ListLinks(ctx context.Context, arg ListLinksParams) ([]Link, e
 	return items, nil
 }
 
+const listLinksWithClickCount = `-- name: ListLinksWithClickCount :many
+SELECT
+  l.id, l.user_id, l.domain_id, l.alias, l.target_url, l.title, l.tags, l.created_at, l.updated_at, l.expires_at, l.deleted_at,
+  COALESCE((
+    SELECT count(*)::bigint
+    FROM click_events ce
+    WHERE ce.link_id = l.id
+  ), 0)::bigint AS click_count
+FROM links l
+WHERE l.user_id = $1
+  AND (l.deleted_at IS NULL OR $3::boolean = true)
+  AND ($5::text = '' OR $5::text = ANY(l.tags))
+ORDER BY l.created_at DESC
+LIMIT $2 OFFSET $4
+`
+
+type ListLinksWithClickCountParams struct {
+	UserID  pgtype.UUID `json:"user_id"`
+	Limit   int32       `json:"limit"`
+	Column3 bool        `json:"column_3"`
+	Offset  int32       `json:"offset"`
+	Column5 string      `json:"column_5"`
+}
+
+type ListLinksWithClickCountRow struct {
+	ID         pgtype.UUID        `json:"id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	DomainID   pgtype.UUID        `json:"domain_id"`
+	Alias      string             `json:"alias"`
+	TargetUrl  string             `json:"target_url"`
+	Title      pgtype.Text        `json:"title"`
+	Tags       []string           `json:"tags"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
+	ClickCount int64              `json:"click_count"`
+}
+
+func (q *Queries) ListLinksWithClickCount(ctx context.Context, arg ListLinksWithClickCountParams) ([]ListLinksWithClickCountRow, error) {
+	rows, err := q.db.Query(ctx, listLinksWithClickCount,
+		arg.UserID,
+		arg.Limit,
+		arg.Column3,
+		arg.Offset,
+		arg.Column5,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLinksWithClickCountRow
+	for rows.Next() {
+		var i ListLinksWithClickCountRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.DomainID,
+			&i.Alias,
+			&i.TargetUrl,
+			&i.Title,
+			&i.Tags,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ExpiresAt,
+			&i.DeletedAt,
+			&i.ClickCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteLink = `-- name: SoftDeleteLink :one
 UPDATE links
 SET deleted_at = now(),

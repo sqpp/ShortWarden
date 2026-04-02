@@ -150,7 +150,8 @@ func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiLink := h.linkToAPI(r.Context(), requestScheme(r), uid, row)
+	cc := int64(0)
+	apiLink := h.linkToAPIWithClickCount(r.Context(), requestScheme(r), uid, row, cc)
 	writeJSON(w, http.StatusCreated, apiLink)
 }
 
@@ -177,7 +178,7 @@ func (h *Handler) ListLinks(w http.ResponseWriter, r *http.Request, params genap
 		tag = strings.TrimSpace(*params.Tag)
 	}
 
-	rows, err := h.q.ListLinks(r.Context(), store.ListLinksParams{
+	rows, err := h.q.ListLinksWithClickCount(r.Context(), store.ListLinksWithClickCountParams{
 		UserID:         uuidToPgtype(uid),
 		Limit:          int32(limit),
 		Column3:        includeDeleted,
@@ -190,7 +191,20 @@ func (h *Handler) ListLinks(w http.ResponseWriter, r *http.Request, params genap
 	}
 	out := make([]genapi.Link, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, h.linkToAPI(r.Context(), requestScheme(r), uid, row))
+		l := store.Link{
+			ID:        row.ID,
+			UserID:    row.UserID,
+			DomainID:  row.DomainID,
+			Alias:     row.Alias,
+			TargetUrl: row.TargetUrl,
+			Title:     row.Title,
+			Tags:      row.Tags,
+			CreatedAt: row.CreatedAt,
+			UpdatedAt: row.UpdatedAt,
+			ExpiresAt: row.ExpiresAt,
+			DeletedAt: row.DeletedAt,
+		}
+		out = append(out, h.linkToAPIWithClickCount(r.Context(), requestScheme(r), uid, l, row.ClickCount))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -213,7 +227,8 @@ func (h *Handler) GetLink(w http.ResponseWriter, r *http.Request, id genapi.IdPa
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.linkToAPI(r.Context(), requestScheme(r), uid, row))
+	cc, _ := h.q.CountClickEventsForLink(r.Context(), uuidToPgtype(uuid.UUID(id)))
+	writeJSON(w, http.StatusOK, h.linkToAPIWithClickCount(r.Context(), requestScheme(r), uid, row, cc))
 }
 
 func (h *Handler) UpdateLink(w http.ResponseWriter, r *http.Request, id genapi.IdParam) {
@@ -298,7 +313,8 @@ func (h *Handler) UpdateLink(w http.ResponseWriter, r *http.Request, id genapi.I
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.linkToAPI(r.Context(), requestScheme(r), uid, row))
+	cc, _ := h.q.CountClickEventsForLink(r.Context(), uuidToPgtype(uuid.UUID(id)))
+	writeJSON(w, http.StatusOK, h.linkToAPIWithClickCount(r.Context(), requestScheme(r), uid, row, cc))
 }
 
 func (h *Handler) DeleteLink(w http.ResponseWriter, r *http.Request, id genapi.IdParam) {
@@ -322,10 +338,15 @@ func (h *Handler) DeleteLink(w http.ResponseWriter, r *http.Request, id genapi.I
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.linkToAPI(r.Context(), requestScheme(r), uid, row))
+	cc, _ := h.q.CountClickEventsForLink(r.Context(), uuidToPgtype(uuid.UUID(id)))
+	writeJSON(w, http.StatusOK, h.linkToAPIWithClickCount(r.Context(), requestScheme(r), uid, row, cc))
 }
 
 func (h *Handler) linkToAPI(ctx context.Context, scheme string, uid uuid.UUID, l store.Link) genapi.Link {
+	return h.linkToAPIWithClickCount(ctx, scheme, uid, l, 0)
+}
+
+func (h *Handler) linkToAPIWithClickCount(ctx context.Context, scheme string, uid uuid.UUID, l store.Link, clickCount int64) genapi.Link {
 	id, _ := uuidFromPgtypeUUID(l.ID)
 
 	var domainID *openapi_types.UUID
@@ -350,6 +371,7 @@ func (h *Handler) linkToAPI(ctx context.Context, scheme string, uid uuid.UUID, l
 	base := h.resolveShortBaseForLink(ctx, scheme, uid, l)
 	short := strings.TrimRight(base, "/") + "/r/" + l.Alias
 
+	cc := clickCount
 	return genapi.Link{
 		Id:        openapi_types.UUID(id),
 		DomainId:  domainID,
@@ -361,6 +383,7 @@ func (h *Handler) linkToAPI(ctx context.Context, scheme string, uid uuid.UUID, l
 		UpdatedAt: l.UpdatedAt.Time,
 		ExpiresAt: expires,
 		DeletedAt: deleted,
+		ClickCount: &cc,
 		ShortUrl:  &short,
 	}
 }

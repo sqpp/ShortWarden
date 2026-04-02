@@ -4,6 +4,7 @@ import { useAuthStore } from './stores/auth'
 const LoginView = () => import('./views/LoginView.vue')
 const RegisterView = () => import('./views/RegisterView.vue')
 const AppLayout = () => import('./views/AppLayout.vue')
+const HomeView = () => import('./views/HomeView.vue')
 const LinksView = () => import('./views/LinksView.vue')
 const LinkDetailView = () => import('./views/LinkDetailView.vue')
 const DomainsView = () => import('./views/DomainsView.vue')
@@ -15,13 +16,14 @@ const SettingsView = () => import('./views/SettingsView.vue')
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/app/links' },
+    { path: '/', redirect: '/app/home' },
     { path: '/login', component: LoginView, meta: { public: true } },
     { path: '/register', component: RegisterView, meta: { public: true } },
     {
       path: '/app',
       component: AppLayout,
       children: [
+        { path: 'home', component: HomeView },
         { path: 'links', component: LinksView },
         { path: 'links/:id', component: LinkDetailView },
         { path: 'domains', component: DomainsView },

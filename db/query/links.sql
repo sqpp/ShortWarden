@@ -17,6 +17,21 @@ WHERE user_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $4;
 
+-- name: ListLinksWithClickCount :many
+SELECT
+  l.*,
+  COALESCE((
+    SELECT count(*)::bigint
+    FROM click_events ce
+    WHERE ce.link_id = l.id
+  ), 0)::bigint AS click_count
+FROM links l
+WHERE l.user_id = $1
+  AND (l.deleted_at IS NULL OR $3::boolean = true)
+  AND ($5::text = '' OR $5::text = ANY(l.tags))
+ORDER BY l.created_at DESC
+LIMIT $2 OFFSET $4;
+
 -- name: UpdateLink :one
 UPDATE links
 SET domain_id = $3,

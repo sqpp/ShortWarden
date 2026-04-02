@@ -15,6 +15,10 @@ function setMsg(s) {
   document.getElementById("msg").textContent = s;
 }
 
+function setApiWarn(show) {
+  document.getElementById("apiWarn").style.display = show ? "block" : "none";
+}
+
 function computeExpires(preset, customValue) {
   if (!preset) return "";
   if (preset === "custom") return customValue.trim();
@@ -47,11 +51,56 @@ function computeExpires(preset, customValue) {
   }
 }
 
+async function loadDomains() {
+  const { baseUrl, apiKey } = await getConfig();
+  if (!apiKey) return;
+  try {
+    const res = await fetch(`${baseUrl}/v1/domains?limit=200&offset=0`, {
+      headers: { Authorization: `ApiKey ${apiKey}` },
+    });
+    if (!res.ok) return;
+    const ds = await res.json();
+    const sel = document.getElementById("domain");
+    // keep first option (primary)
+    while (sel.options.length > 1) sel.remove(1);
+    for (const d of ds) {
+      if (d.status !== "verified") continue;
+      const opt = document.createElement("option");
+      opt.value = d.id;
+      opt.textContent = d.hostname;
+      sel.appendChild(opt);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function validateApiKey() {
+  const { baseUrl, apiKey } = await getConfig();
+  if (!apiKey) {
+    setApiWarn(true);
+    return false;
+  }
+  try {
+    const res = await fetch(`${baseUrl}/v1/me`, { headers: { Authorization: `ApiKey ${apiKey}` } });
+    if (!res.ok) {
+      setApiWarn(true);
+      return false;
+    }
+    setApiWarn(false);
+    return true;
+  } catch {
+    setApiWarn(true);
+    return false;
+  }
+}
+
 async function shorten() {
   setMsg("");
   const { baseUrl, apiKey } = await getConfig();
   if (!apiKey) {
-    setMsg("Missing API key. Open Options and paste one.");
+    setApiWarn(true);
+    setMsg("Missing API key.");
     return;
   }
 
@@ -59,10 +108,12 @@ async function shorten() {
   const alias = document.getElementById("alias").value.trim();
   const preset = document.getElementById("expiryPreset").value;
   const expires = computeExpires(preset, document.getElementById("expires").value);
+  const domainId = document.getElementById("domain").value;
 
   const payload = { target_url: url };
   if (alias) payload.alias = alias;
   if (expires) payload.expires_at = expires;
+  if (domainId) payload.domain_id = domainId;
 
   try {
     const res = await fetch(`${baseUrl}/v1/links`, {
@@ -86,7 +137,7 @@ async function shorten() {
 document.getElementById("shorten").addEventListener("click", shorten);
 document.getElementById("openApp").addEventListener("click", async () => {
   const { baseUrl } = await getConfig();
-  chrome.tabs.create({ url: `${baseUrl}/` });
+  chrome.tabs.create({ url: `${baseUrl}/app/home` });
 });
 document.getElementById("openOptions").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
@@ -97,5 +148,7 @@ document.getElementById("openOptions").addEventListener("click", () => chrome.ru
   presetEl.addEventListener("change", () => {
     customEl.style.display = presetEl.value === "custom" ? "block" : "none";
   });
+  await validateApiKey();
+  await loadDomains();
 })();
 

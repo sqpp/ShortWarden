@@ -528,6 +528,67 @@ paths:
         "204":
           description: No Content
 
+  /v1/stats:
+    get:
+      tags: [Users]
+      summary: Get dashboard stats
+      description: Returns high-level stats for the authenticated user.
+      operationId: getStats
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+
+  /v1/home/recent-clicks:
+    get:
+      tags: [Users]
+      summary: List recent clicks (dashboard)
+      description: Returns recent click events across all links for the authenticated user.
+      operationId: listRecentClicks
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RecentClick" }
+
+  /v1/home/top-links:
+    get:
+      tags: [Users]
+      summary: List top links (dashboard)
+      description: Returns top links by clicks within a recent window for the authenticated user.
+      operationId: listTopLinks
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 10 }
+        - name: days
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 365, default: 7 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TopLink" }
+
   /v1/me/password:
     post:
       tags: [Users]
@@ -987,9 +1048,47 @@ components:
         updated_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time, nullable: true }
         deleted_at: { type: string, format: date-time, nullable: true }
+        click_count:
+          type: integer
+          format: int64
+          description: Total click count for this link (all-time).
         short_url:
           type: string
           description: Convenience field with full short URL (domain + /r/alias).
+
+    Stats:
+      type: object
+      required: [links_total, clicks_total, clicks_24h, clicks_7d]
+      properties:
+        links_total: { type: integer, format: int64 }
+        clicks_total: { type: integer, format: int64 }
+        clicks_24h: { type: integer, format: int64 }
+        clicks_7d: { type: integer, format: int64 }
+
+    RecentClick:
+      type: object
+      required: [id, clicked_at, link_id, alias]
+      properties:
+        id: { type: integer, format: int64 }
+        clicked_at: { type: string, format: date-time }
+        link_id: { type: string, format: uuid }
+        alias: { type: string }
+        domain_id: { type: string, format: uuid, nullable: true }
+        referrer: { type: string, nullable: true }
+        ip: { type: string, nullable: true }
+        country: { type: string, nullable: true }
+        device: { type: string, nullable: true }
+        short_url:
+          type: string
+          nullable: true
+          description: Convenience full short URL.
+
+    TopLink:
+      type: object
+      required: [link, clicks]
+      properties:
+        link: { $ref: "#/components/schemas/Link" }
+        clicks: { type: integer, format: int64 }
 
     CreateLinkRequest:
       type: object

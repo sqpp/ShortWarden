@@ -5,34 +5,64 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ShortWarden Options</title>
     <style>
-      body { font-family: system-ui, Segoe UI, sans-serif; padding: 16px; max-width: 720px; }
-      label { display: block; font-weight: 600; margin-top: 12px; }
-      input { width: 100%; padding: 8px; margin-top: 6px; }
-      button { margin-top: 12px; padding: 8px 12px; }
-      .row { display: flex; gap: 8px; }
+      :root { color-scheme: dark; }
+      body { font-family: system-ui, Segoe UI, sans-serif; margin:0; background:#020617; color:#e2e8f0; }
+      .page { min-height: 100vh; display:flex; align-items:center; justify-content:center; padding: 24px; }
+      .container { width: 100%; max-width: 720px; }
+      h1 { margin:0; font-size: 18px; }
+      p { margin: 8px 0 0 0; color:#94a3b8; font-size: 13px; line-height:1.4; }
+      label { display: block; font-size: 11px; font-weight: 700; margin-top: 14px; color:#94a3b8; letter-spacing:.06em; text-transform:uppercase; }
+      input { width: 100%; padding: 10px 12px; margin-top: 6px; box-sizing:border-box; background:#020617; border:1px solid #1f2937; border-radius:10px; color:#e2e8f0; }
+      input::placeholder { color:#64748b; }
+      .card { margin-top: 16px; border:1px solid #1f2937; border-radius:14px; background:rgba(2,6,23,.6); }
+      .cardBody { padding: 16px; }
+      .row { display: flex; gap: 10px; margin-top: 12px; }
       .row > * { flex: 1; }
-      .msg { margin-top: 12px; white-space: pre-wrap; }
-      code { background: #f3f4f6; padding: 2px 4px; border-radius: 4px; }
+      button { padding: 10px 12px; border-radius: 12px; border:1px solid #334155; background:#0b1220; color:#e2e8f0; font-weight:600; }
+      button:hover { background:#111a2b; }
+      .primary { background:#a3e635; color:#0b1220; border-color:rgba(163,230,53,.45); }
+      .primary:hover { background:#bef264; }
+      .msg { margin-top: 12px; white-space: pre-wrap; color:#cbd5e1; font-size: 13px; }
+      code { background:#0b1220; border:1px solid #1f2937; padding: 2px 6px; border-radius: 8px; color:#e2e8f0; }
+      .brand { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+      .pill { font-size: 12px; padding: 6px 10px; border-radius: 999px; border:1px solid rgba(163,230,53,.25); background:rgba(163,230,53,.08); color:#d9f99d; }
+      .meta { margin-top: 10px; display:flex; gap: 8px; flex-wrap:wrap; color:#94a3b8; font-size: 12px; }
+      .kv { border:1px solid #1f2937; background:#0b1220; border-radius: 999px; padding: 6px 10px; }
     </style>
   </head>
   <body>
-    <h1>ShortWarden</h1>
-    <p>
-      Configure API access. Create an API key in the web UI under <code>/app/api-keys</code>.
-    </p>
+    <div class="page">
+      <div class="container">
+        <div class="brand">
+          <div>
+            <h1>ShortWarden</h1>
+            <p>Configure API access. Create an API key in the web UI under <code>/app/api-keys</code>.</p>
+            <div class="meta">
+              <span class="kv">Version: <span id="ver">—</span></span>
+              <span class="kv">Extension ID: <span id="extId">—</span></span>
+            </div>
+          </div>
+          <div id="status" class="pill">Not tested</div>
+        </div>
 
-    <label>API base URL</label>
-    <input id="baseUrl" placeholder="http://localhost:8080" />
+        <div class="card">
+          <div class="cardBody">
+            <label>API base URL</label>
+            <input id="baseUrl" placeholder="http://localhost:8080" />
 
-    <label>API key</label>
-    <input id="apiKey" placeholder="sw_..." />
+            <label>API key</label>
+            <input id="apiKey" placeholder="sw_..." />
 
-    <div class="row">
-      <button id="save">Save</button>
-      <button id="test">Test</button>
+            <div class="row">
+              <button id="save" class="primary">Save</button>
+              <button id="test">Test</button>
+            </div>
+
+            <div id="msg" class="msg"></div>
+          </div>
+        </div>
+      </div>
     </div>
-
-    <div id="msg" class="msg"></div>
 
     <script src="options.js"></script>
   </body>

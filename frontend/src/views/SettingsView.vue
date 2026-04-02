@@ -1,8 +1,21 @@
 <script setup lang="ts">
 import { useAuthStore } from '../stores/auth'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+
+declare const __APP_VERSION__: string
+declare const __BUILD_TIME__: string
+declare const __GIT_SHA__: string
+declare const __REPO_URL__: string
 
 const auth = useAuthStore()
+const envVersion = (import.meta.env.VITE_APP_VERSION as string | undefined) ?? ''
+const envBuildTime = (import.meta.env.VITE_BUILD_TIME as string | undefined) ?? ''
+const envGitSha = (import.meta.env.VITE_GIT_SHA as string | undefined) ?? ''
+const envRepoUrl = (import.meta.env.VITE_REPO_URL as string | undefined) ?? ''
+const appVersionText = computed(() => envVersion || __APP_VERSION__ || '')
+const buildTimeText = computed(() => envBuildTime || __BUILD_TIME__ || '')
+const gitShaText = computed(() => envGitSha || __GIT_SHA__ || '')
+const repoUrlText = computed(() => envRepoUrl || __REPO_URL__ || '')
 
 const currentPassword = ref('')
 const newPassword = ref('')
@@ -12,6 +25,126 @@ const loading = ref(false)
 const redirectDelaySeconds = ref(0)
 const keepExpiredLinks = ref(false)
 const timezone = ref('UTC')
+const timezoneOptions = ref<string[]>([])
+const timezoneQuery = ref('')
+const timezoneOpen = ref(false)
+let blurCloseTimer: number | null = null
+const checkingUpdates = ref(false)
+const updateError = ref<string | null>(null)
+const latestVersion = ref<string>('')
+const updateAvailable = ref(false)
+
+function getTimezoneOptions() {
+  const sup = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf
+  if (typeof sup === 'function') {
+    const v = sup('timeZone')
+    if (Array.isArray(v) && v.length) return v
+  }
+  return [
+    'UTC',
+    'Europe/London',
+    'Europe/Berlin',
+    'Europe/Paris',
+    'Europe/Warsaw',
+    'Europe/Bucharest',
+    'Europe/Istanbul',
+    'America/New_York',
+    'America/Chicago',
+    'America/Denver',
+    'America/Los_Angeles',
+    'America/Sao_Paulo',
+    'Asia/Dubai',
+    'Asia/Kolkata',
+    'Asia/Bangkok',
+    'Asia/Singapore',
+    'Asia/Tokyo',
+    'Asia/Seoul',
+    'Australia/Sydney',
+  ]
+}
+
+const timezoneHint = computed(() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return 'UTC'
+  }
+})
+
+const timezoneDisplay = computed(() => timezone.value || timezoneHint.value)
+
+const filteredTimezones = computed(() => {
+  const q = timezoneQuery.value.trim().toLowerCase()
+  if (!q) return timezoneOptions.value.slice(0, 100)
+  return timezoneOptions.value.filter((z) => z.toLowerCase().includes(q)).slice(0, 100)
+})
+
+function pickTimezone(z: string) {
+  timezone.value = z
+  timezoneQuery.value = z
+  timezoneOpen.value = false
+}
+
+function scheduleCloseTimezone() {
+  if (blurCloseTimer != null) {
+    clearTimeout(blurCloseTimer)
+  }
+  blurCloseTimer = setTimeout(() => {
+    timezoneOpen.value = false
+    blurCloseTimer = null
+  }, 150) as unknown as number
+}
+
+function parseVersion(v: string) {
+  const clean = v.trim().replace(/^v/i, '')
+  const parts = clean.split('.').map((x) => parseInt(x, 10))
+  return [parts[0] || 0, parts[1] || 0, parts[2] || 0] as const
+}
+
+function isVersionNewer(current: string, latest: string) {
+  const a = parseVersion(current)
+  const b = parseVersion(latest)
+  for (let i = 0; i < 3; i++) {
+    if (b[i] > a[i]) return true
+    if (b[i] < a[i]) return false
+  }
+  return false
+}
+
+function parseRepo(url: string) {
+  const m = url.match(/github\.com\/([^/]+)\/([^/\s]+)/i)
+  if (!m) return null
+  return { owner: m[1], repo: m[2].replace(/\.git$/i, '') }
+}
+
+async function checkForUpdates() {
+  updateError.value = null
+  latestVersion.value = ''
+  updateAvailable.value = false
+  if (!repoUrlText.value) {
+    updateError.value = 'Set VITE_REPO_URL first.'
+    return
+  }
+  const parsed = parseRepo(repoUrlText.value)
+  if (!parsed) {
+    updateError.value = 'Invalid GitHub repo URL.'
+    return
+  }
+  checkingUpdates.value = true
+  try {
+    const res = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/releases/latest`)
+    if (!res.ok) throw new Error('Could not fetch latest release')
+    const j = (await res.json()) as { tag_name?: string; name?: string }
+    const latest = (j.tag_name || j.name || '').trim()
+    if (!latest) throw new Error('No release tag found')
+    latestVersion.value = latest
+    updateAvailable.value = isVersionNewer(appVersionText.value || '0.0.0', latest)
+  } catch (e) {
+    updateError.value = e instanceof Error ? e.message : 'Failed checking updates'
+  } finally {
+    checkingUpdates.value = false
+  }
+}
 
 async function loadSettings() {
   msg.value = null
@@ -26,6 +159,7 @@ async function loadSettings() {
     redirectDelaySeconds.value = j.redirect_delay_seconds
     keepExpiredLinks.value = j.keep_expired_links
     timezone.value = j.timezone
+    timezoneQuery.value = j.timezone
   } catch (e) {
     msg.value = e instanceof Error ? e.message : 'Failed'
   }
@@ -79,76 +213,170 @@ async function changePassword() {
   }
 }
 
-onMounted(loadSettings)
+onMounted(() => {
+  timezoneOptions.value = getTimezoneOptions()
+  void loadSettings()
+  void checkForUpdates()
+})
 </script>
 
 <template>
-  <div class="space-y-4">
-    <div>
+  <div class="space-y-4 max-w-4xl">
+    <div class="max-w-3xl">
       <h1 class="sw-title">Settings</h1>
       <p class="sw-subtitle">Account preferences and security.</p>
-    </div>
-
-    <div class="sw-card">
-      <div class="sw-card-body">
-      <div class="text-sm text-slate-400">Signed in as</div>
-      <div class="mt-1 font-medium">{{ auth.user?.email }}</div>
+      <div class="mt-3 text-sm text-slate-400">
+        Signed in as <span class="font-medium text-slate-200">{{ auth.user?.email }}</span>
       </div>
     </div>
 
-    <div class="sw-card">
-      <div class="sw-card-body">
-      <div class="text-sm font-medium text-slate-100">Preferences</div>
-      <div class="mt-3 grid gap-3 md:grid-cols-3">
-        <div>
-          <label class="sw-label">Redirect delay (seconds)</label>
-          <input v-model.number="redirectDelaySeconds" class="sw-input mt-1" type="number" min="0" max="30" />
-        </div>
-        <div class="flex items-center gap-2 pt-6">
-          <input id="keepExpired" v-model="keepExpiredLinks" type="checkbox" />
-          <label for="keepExpired" class="text-sm">Keep expired links</label>
-        </div>
-        <div>
-          <label class="sw-label">Timezone</label>
-          <input v-model="timezone" class="sw-input mt-1" placeholder="UTC" />
+    <div class="space-y-4">
+      <div class="sw-card max-w-3xl">
+        <div class="sw-card-body">
+          <div class="text-sm font-medium text-slate-100">About</div>
+          <div class="mt-3 grid gap-3 md:grid-cols-2">
+            <div>
+              <div class="text-xs uppercase tracking-wide text-slate-500">Version</div>
+              <div class="mt-1 text-sm text-slate-200">{{ appVersionText || '—' }}</div>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wide text-slate-500">Build</div>
+              <div class="mt-1 text-sm text-slate-200">{{ buildTimeText || '—' }}</div>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wide text-slate-500">Commit</div>
+              <div class="mt-1 text-sm text-slate-200">{{ gitShaText || '—' }}</div>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wide text-slate-500">GitHub</div>
+              <div class="mt-1">
+                <a v-if="repoUrlText" class="text-sm text-lime-300 hover:underline" :href="repoUrlText" target="_blank" rel="noreferrer">
+                  {{ repoUrlText }}
+                </a>
+                <div v-else class="text-sm text-slate-400">Set `VITE_REPO_URL` to show this.</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="mt-3 flex items-center justify-between">
-        <div v-if="msg" class="text-sm text-slate-300">{{ msg }}</div>
-        <button
-          class="sw-btn"
-          :disabled="loading"
-          @click="saveSettings"
-        >
-          Save preferences
-        </button>
-      </div>
-      </div>
-    </div>
 
-    <div class="sw-card">
-      <div class="sw-card-body">
-      <div class="text-sm font-medium text-slate-100">Change password</div>
-      <div class="mt-3 grid gap-3 md:grid-cols-2">
-        <div>
-          <label class="sw-label">Current password</label>
-          <input v-model="currentPassword" class="sw-input mt-1" type="password" />
-        </div>
-        <div>
-          <label class="sw-label">New password</label>
-          <input v-model="newPassword" class="sw-input mt-1" type="password" minlength="8" />
+      <div class="sw-card max-w-3xl">
+        <div class="sw-card-body">
+          <div class="text-sm font-medium text-slate-100">Updates</div>
+          <div class="mt-3 grid gap-3 md:grid-cols-2">
+            <div>
+              <div class="text-xs uppercase tracking-wide text-slate-500">Current</div>
+              <div class="mt-1 text-sm text-slate-200">{{ appVersionText || '—' }}</div>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wide text-slate-500">Latest</div>
+              <div class="mt-1 text-sm" :class="updateAvailable ? 'text-lime-300' : 'text-slate-200'">
+                {{ latestVersion || '—' }}
+                <span v-if="updateAvailable" class="ml-2 text-xs font-semibold uppercase tracking-wide">Update available</span>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2">
+            <button class="sw-btn" :disabled="checkingUpdates" @click="checkForUpdates">
+              {{ checkingUpdates ? 'Checking…' : 'Check for updates' }}
+            </button>
+            <a
+              v-if="updateAvailable && repoUrlText"
+              class="sw-btn sw-btn-primary"
+              :href="`${repoUrlText.replace(/\\.git$/i, '')}/releases`"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open releases
+            </a>
+          </div>
+          <div v-if="updateError" class="mt-2 text-sm text-red-200">{{ updateError }}</div>
+          <div class="mt-3 text-xs text-slate-400">
+            Manual update command:
+            <code class="ml-1 rounded border border-white/10 bg-[#1c1f2a] px-1 py-0.5 text-slate-200">
+              docker compose pull && docker compose up -d --remove-orphans
+            </code>
+          </div>
         </div>
       </div>
-      <div class="mt-3 flex items-center justify-between">
-        <div v-if="msg" class="text-sm text-slate-300">{{ msg }}</div>
-        <button
-          class="sw-btn sw-btn-primary"
-          :disabled="loading"
-          @click="changePassword"
-        >
-          {{ loading ? 'Saving…' : 'Update password' }}
-        </button>
+
+      <div class="sw-card max-w-3xl">
+        <div class="sw-card-body">
+          <div class="text-sm font-medium text-slate-100">Preferences</div>
+          <div class="mt-3 space-y-3">
+            <div>
+              <label class="sw-label">Redirect delay (seconds)</label>
+              <input v-model.number="redirectDelaySeconds" class="sw-input mt-1" type="number" min="0" max="30" />
+            </div>
+
+            <div class="flex items-center gap-2">
+              <input id="keepExpired" v-model="keepExpiredLinks" type="checkbox" />
+              <label for="keepExpired" class="text-sm">Keep expired links</label>
+            </div>
+
+            <div class="relative">
+              <label class="sw-label">Timezone</label>
+              <input
+                v-model="timezoneQuery"
+                class="sw-input mt-1"
+                :placeholder="timezoneDisplay"
+                @focus="
+                  timezoneOpen = true;
+                  timezoneQuery = timezoneDisplay;
+                "
+                @input="timezoneOpen = true"
+                @blur="scheduleCloseTimezone"
+              />
+
+              <div
+                v-if="timezoneOpen"
+                class="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-white/10 bg-[#141826] shadow-[0_18px_60px_rgba(0,0,0,0.55)]"
+              >
+                <div class="max-h-64 overflow-auto py-1">
+                  <button
+                    v-for="z in filteredTimezones"
+                    :key="z"
+                    type="button"
+                    class="block w-full truncate px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5"
+                    @mousedown.prevent="pickTimezone(z)"
+                  >
+                    {{ z }}
+                  </button>
+                  <div v-if="!filteredTimezones.length" class="px-3 py-2 text-sm text-slate-400">No matches</div>
+                </div>
+              </div>
+
+              <div class="mt-1 text-xs text-slate-500">Example: {{ timezoneHint }}</div>
+            </div>
+          </div>
+
+          <div class="mt-4 flex items-center justify-between gap-3">
+            <div v-if="msg" class="text-sm text-slate-300">{{ msg }}</div>
+            <button class="sw-btn" :disabled="loading" @click="saveSettings">Save preferences</button>
+          </div>
+        </div>
       </div>
+
+      <div class="sw-card max-w-3xl">
+        <div class="sw-card-body">
+          <div class="text-sm font-medium text-slate-100">Change password</div>
+          <div class="mt-3 grid gap-3 md:grid-cols-2">
+            <div>
+              <label class="sw-label">Current password</label>
+              <input v-model="currentPassword" class="sw-input mt-1" type="password" />
+            </div>
+            <div>
+              <label class="sw-label">New password</label>
+              <input v-model="newPassword" class="sw-input mt-1" type="password" minlength="8" />
+            </div>
+          </div>
+          <div class="mt-4 flex items-center justify-between gap-3">
+            <div v-if="msg" class="text-sm text-slate-300">{{ msg }}</div>
+            <button class="sw-btn sw-btn-primary" :disabled="loading" @click="changePassword">
+              {{ loading ? 'Saving…' : 'Update password' }}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

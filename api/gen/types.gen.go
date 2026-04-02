@@ -155,12 +155,15 @@ type ImportResult struct {
 
 // Link defines model for Link.
 type Link struct {
-	Alias     string              `json:"alias"`
-	CreatedAt time.Time           `json:"created_at"`
-	DeletedAt *time.Time          `json:"deleted_at,omitempty"`
-	DomainId  *openapi_types.UUID `json:"domain_id,omitempty"`
-	ExpiresAt *time.Time          `json:"expires_at,omitempty"`
-	Id        openapi_types.UUID  `json:"id"`
+	Alias string `json:"alias"`
+
+	// ClickCount Total click count for this link (all-time).
+	ClickCount *int64              `json:"click_count,omitempty"`
+	CreatedAt  time.Time           `json:"created_at"`
+	DeletedAt  *time.Time          `json:"deleted_at,omitempty"`
+	DomainId   *openapi_types.UUID `json:"domain_id,omitempty"`
+	ExpiresAt  *time.Time          `json:"expires_at,omitempty"`
+	Id         openapi_types.UUID  `json:"id"`
 
 	// ShortUrl Convenience field with full short URL (domain + /r/alias).
 	ShortUrl  *string   `json:"short_url,omitempty"`
@@ -216,10 +219,34 @@ type LoginResponse struct {
 	User  User    `json:"user"`
 }
 
+// RecentClick defines model for RecentClick.
+type RecentClick struct {
+	Alias     string              `json:"alias"`
+	ClickedAt time.Time           `json:"clicked_at"`
+	Country   *string             `json:"country,omitempty"`
+	Device    *string             `json:"device,omitempty"`
+	DomainId  *openapi_types.UUID `json:"domain_id,omitempty"`
+	Id        int64               `json:"id"`
+	Ip        *string             `json:"ip,omitempty"`
+	LinkId    openapi_types.UUID  `json:"link_id"`
+	Referrer  *string             `json:"referrer,omitempty"`
+
+	// ShortUrl Convenience full short URL.
+	ShortUrl *string `json:"short_url,omitempty"`
+}
+
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {
 	Email    openapi_types.Email `json:"email"`
 	Password string              `json:"password"`
+}
+
+// Stats defines model for Stats.
+type Stats struct {
+	Clicks24h   int64 `json:"clicks_24h"`
+	Clicks7d    int64 `json:"clicks_7d"`
+	ClicksTotal int64 `json:"clicks_total"`
+	LinksTotal  int64 `json:"links_total"`
 }
 
 // Tag defines model for Tag.
@@ -228,6 +255,12 @@ type Tag struct {
 	Curated   *bool  `json:"curated,omitempty"`
 	LinkCount int64  `json:"link_count"`
 	Name      string `json:"name"`
+}
+
+// TopLink defines model for TopLink.
+type TopLink struct {
+	Clicks int64 `json:"clicks"`
+	Link   Link  `json:"link"`
 }
 
 // UpdateLinkRequest defines model for UpdateLinkRequest.
@@ -295,6 +328,17 @@ type ListDomainsParams struct {
 
 // ReplaceDomainDefaultTagsJSONBody defines parameters for ReplaceDomainDefaultTags.
 type ReplaceDomainDefaultTagsJSONBody = []string
+
+// ListRecentClicksParams defines parameters for ListRecentClicks.
+type ListRecentClicksParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListTopLinksParams defines parameters for ListTopLinks.
+type ListTopLinksParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+	Days  *int `form:"days,omitempty" json:"days,omitempty"`
+}
 
 // ListLinksParams defines parameters for ListLinks.
 type ListLinksParams struct {

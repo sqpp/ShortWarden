@@ -10,6 +10,11 @@ WHERE link_id = $1
 ORDER BY clicked_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: CountClickEventsForLink :one
+SELECT count(*)::bigint AS click_count
+FROM click_events
+WHERE link_id = $1;
+
 -- name: ClickTotalsByDay :many
 SELECT
   (date_trunc('day', clicked_at))::timestamptz AS day,

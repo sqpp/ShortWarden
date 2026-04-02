@@ -68,6 +68,12 @@ type ServerInterface interface {
 	// Verify domain
 	// (POST /v1/domains/{id}/verify)
 	VerifyDomain(w http.ResponseWriter, r *http.Request, id IdParam)
+	// List recent clicks (dashboard)
+	// (GET /v1/home/recent-clicks)
+	ListRecentClicks(w http.ResponseWriter, r *http.Request, params ListRecentClicksParams)
+	// List top links (dashboard)
+	// (GET /v1/home/top-links)
+	ListTopLinks(w http.ResponseWriter, r *http.Request, params ListTopLinksParams)
 	// List links
 	// (GET /v1/links)
 	ListLinks(w http.ResponseWriter, r *http.Request, params ListLinksParams)
@@ -107,6 +113,9 @@ type ServerInterface interface {
 	// Update settings
 	// (PATCH /v1/me/settings)
 	UpdateSettings(w http.ResponseWriter, r *http.Request)
+	// Get dashboard stats
+	// (GET /v1/stats)
+	GetStats(w http.ResponseWriter, r *http.Request)
 	// List tags
 	// (GET /v1/tags)
 	ListTags(w http.ResponseWriter, r *http.Request, params ListTagsParams)
@@ -230,6 +239,18 @@ func (_ Unimplemented) VerifyDomain(w http.ResponseWriter, r *http.Request, id I
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List recent clicks (dashboard)
+// (GET /v1/home/recent-clicks)
+func (_ Unimplemented) ListRecentClicks(w http.ResponseWriter, r *http.Request, params ListRecentClicksParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List top links (dashboard)
+// (GET /v1/home/top-links)
+func (_ Unimplemented) ListTopLinks(w http.ResponseWriter, r *http.Request, params ListTopLinksParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // List links
 // (GET /v1/links)
 func (_ Unimplemented) ListLinks(w http.ResponseWriter, r *http.Request, params ListLinksParams) {
@@ -305,6 +326,12 @@ func (_ Unimplemented) GetSettings(w http.ResponseWriter, r *http.Request) {
 // Update settings
 // (PATCH /v1/me/settings)
 func (_ Unimplemented) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get dashboard stats
+// (GET /v1/stats)
+func (_ Unimplemented) GetStats(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -801,6 +828,80 @@ func (siw *ServerInterfaceWrapper) VerifyDomain(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ListRecentClicks operation middleware
+func (siw *ServerInterfaceWrapper) ListRecentClicks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListRecentClicksParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRecentClicks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListTopLinks operation middleware
+func (siw *ServerInterfaceWrapper) ListTopLinks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTopLinksParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "days" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "days", r.URL.Query(), &params.Days, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "days", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTopLinks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListLinks operation middleware
 func (siw *ServerInterfaceWrapper) ListLinks(w http.ResponseWriter, r *http.Request) {
 
@@ -1251,6 +1352,26 @@ func (siw *ServerInterfaceWrapper) UpdateSettings(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetStats operation middleware
+func (siw *ServerInterfaceWrapper) GetStats(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetStats(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListTags operation middleware
 func (siw *ServerInterfaceWrapper) ListTags(w http.ResponseWriter, r *http.Request) {
 
@@ -1513,6 +1634,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/domains/{id}/verify", wrapper.VerifyDomain)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/home/recent-clicks", wrapper.ListRecentClicks)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/home/top-links", wrapper.ListTopLinks)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/links", wrapper.ListLinks)
 	})
 	r.Group(func(r chi.Router) {
@@ -1550,6 +1677,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/v1/me/settings", wrapper.UpdateSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/stats", wrapper.GetStats)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/tags", wrapper.ListTags)

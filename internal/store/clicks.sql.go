@@ -55,6 +55,19 @@ func (q *Queries) ClickTotalsByDay(ctx context.Context, arg ClickTotalsByDayPara
 	return items, nil
 }
 
+const countClickEventsForLink = `-- name: CountClickEventsForLink :one
+SELECT count(*)::bigint AS click_count
+FROM click_events
+WHERE link_id = $1
+`
+
+func (q *Queries) CountClickEventsForLink(ctx context.Context, linkID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countClickEventsForLink, linkID)
+	var click_count int64
+	err := row.Scan(&click_count)
+	return click_count, err
+}
+
 const insertClickEvent = `-- name: InsertClickEvent :one
 INSERT INTO click_events (link_id, clicked_at, referrer, user_agent, ip, country, device)
 VALUES ($1, now(), $2, $3, $4, $5, $6)

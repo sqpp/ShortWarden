@@ -51,6 +51,9 @@ Frontend URL:
 API URL:
 - `http://localhost:8080`
 
+App:
+- `http://localhost:5173/app/home`
+
 OpenAPI spec:
 - `http://localhost:8080/openapi.yaml`
 
