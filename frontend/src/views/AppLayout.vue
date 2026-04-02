@@ -109,10 +109,19 @@ async function checkForUpdates() {
   const parsed = parseRepo(repoUrlText.value)
   if (!parsed) return
   try {
-    const res = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/releases/latest`)
-    if (!res.ok) return
-    const j = (await res.json()) as { tag_name?: string; name?: string }
-    const latest = (j.tag_name || j.name || '').trim()
+    let latest = ''
+    const releaseRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/releases/latest`)
+    if (releaseRes.ok) {
+      const j = (await releaseRes.json()) as { tag_name?: string; name?: string }
+      latest = (j.tag_name || j.name || '').trim()
+    } else if (releaseRes.status === 404) {
+      const tagsRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/tags?per_page=1`)
+      if (!tagsRes.ok) return
+      const tags = (await tagsRes.json()) as Array<{ name?: string }> 
+      latest = (tags[0]?.name || '').trim()
+    } else {
+      return
+    }
     if (!latest) return
     latestVersion.value = latest
     updateAvailable.value = isVersionNewer(appVersionText.value || '0.0.0', latest)

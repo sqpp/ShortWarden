@@ -41,6 +41,10 @@ func NewServer(cfg config.Config, db *pgxpool.Pool) http.Handler {
 	handler := genapi.HandlerFromMux(h, r)
 	_ = handler
 
+	// Non-OpenAPI internal system endpoints (authenticated + CSRF protected in handlers).
+	r.Post("/v1/system/update", h.TriggerUpdate)
+	r.Get("/v1/system/update", h.GetUpdateStatus)
+
 	return r
 }
 

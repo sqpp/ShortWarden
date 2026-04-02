@@ -33,6 +33,9 @@ const checkingUpdates = ref(false)
 const updateError = ref<string | null>(null)
 const latestVersion = ref<string>('')
 const updateAvailable = ref(false)
+const runningUpdate = ref(false)
+const updateOutput = ref('')
+const updateRunError = ref<string | null>(null)
 
 function getTimezoneOptions() {
   const sup = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf
@@ -132,11 +135,23 @@ async function checkForUpdates() {
   }
   checkingUpdates.value = true
   try {
-    const res = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/releases/latest`)
-    if (!res.ok) throw new Error('Could not fetch latest release')
-    const j = (await res.json()) as { tag_name?: string; name?: string }
-    const latest = (j.tag_name || j.name || '').trim()
-    if (!latest) throw new Error('No release tag found')
+    // Prefer official releases, but fall back to tags when no release exists.
+    let latest = ''
+    const releaseRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/releases/latest`)
+    if (releaseRes.ok) {
+      const j = (await releaseRes.json()) as { tag_name?: string; name?: string }
+      latest = (j.tag_name || j.name || '').trim()
+    } else if (releaseRes.status === 404) {
+      const tagsRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/tags?per_page=1`)
+      if (!tagsRes.ok) throw new Error(`Could not fetch latest tag (${tagsRes.status})`)
+      const tags = (await tagsRes.json()) as Array<{ name?: string }>
+      latest = (tags[0]?.name || '').trim()
+    } else if (releaseRes.status === 403) {
+      throw new Error('GitHub API rate limit reached. Try again later.')
+    } else {
+      throw new Error(`Could not fetch latest release (${releaseRes.status})`)
+    }
+    if (!latest) throw new Error('No release/tag found')
     latestVersion.value = latest
     updateAvailable.value = isVersionNewer(appVersionText.value || '0.0.0', latest)
   } catch (e) {
@@ -144,6 +159,55 @@ async function checkForUpdates() {
   } finally {
     checkingUpdates.value = false
   }
+}
+
+type UpdateStatus = {
+  running: boolean
+  last_started?: string
+  last_finished?: string
+  exit_code?: number
+  output?: string
+  error?: string
+}
+
+async function fetchUpdateStatus() {
+  const res = await fetch('/v1/system/update', { credentials: 'include' })
+  if (!res.ok) throw new Error(await res.text())
+  const s = (await res.json()) as UpdateStatus
+  runningUpdate.value = !!s.running
+  updateOutput.value = s.output ?? ''
+  updateRunError.value = s.error ? `Update failed: ${s.error}` : null
+  if (!s.running && typeof s.exit_code === 'number' && s.exit_code !== 0 && !updateRunError.value) {
+    updateRunError.value = `Update failed with exit code ${s.exit_code}`
+  }
+}
+
+async function runUpdateNow() {
+  updateRunError.value = null
+  updateOutput.value = ''
+  if (!auth.csrf) await auth.bootstrap()
+  if (!auth.csrf) {
+    updateRunError.value = 'Missing CSRF token'
+    return
+  }
+  const res = await fetch('/v1/system/update', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'X-CSRF-Token': auth.csrf },
+  })
+  if (!res.ok) {
+    updateRunError.value = await res.text()
+    return
+  }
+  runningUpdate.value = true
+  const timer = setInterval(async () => {
+    try {
+      await fetchUpdateStatus()
+      if (!runningUpdate.value) clearInterval(timer)
+    } catch {
+      // ignore transient polling errors
+    }
+  }, 2500)
 }
 
 async function loadSettings() {
@@ -217,6 +281,7 @@ onMounted(() => {
   timezoneOptions.value = getTimezoneOptions()
   void loadSettings()
   void checkForUpdates()
+  void fetchUpdateStatus()
 })
 </script>
 
@@ -280,6 +345,9 @@ onMounted(() => {
             <button class="sw-btn" :disabled="checkingUpdates" @click="checkForUpdates">
               {{ checkingUpdates ? 'Checking…' : 'Check for updates' }}
             </button>
+            <button class="sw-btn sw-btn-primary" :disabled="runningUpdate" @click="runUpdateNow">
+              {{ runningUpdate ? 'Updating…' : 'Update now' }}
+            </button>
             <a
               v-if="updateAvailable && repoUrlText"
               class="sw-btn sw-btn-primary"
@@ -291,12 +359,11 @@ onMounted(() => {
             </a>
           </div>
           <div v-if="updateError" class="mt-2 text-sm text-red-200">{{ updateError }}</div>
-          <div class="mt-3 text-xs text-slate-400">
-            Manual update command:
-            <code class="ml-1 rounded border border-white/10 bg-[#1c1f2a] px-1 py-0.5 text-slate-200">
-              docker compose pull && docker compose up -d --remove-orphans
-            </code>
-          </div>
+          <div v-if="updateRunError" class="mt-2 text-sm text-red-200">{{ updateRunError }}</div>
+          <pre
+            v-if="updateOutput"
+            class="mt-3 max-h-44 overflow-auto rounded border border-white/10 bg-[#1c1f2a] p-2 text-xs text-slate-300"
+          >{{ updateOutput }}</pre>
         </div>
       </div>
 
