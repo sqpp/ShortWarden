@@ -12,10 +12,12 @@ const envVersion = (import.meta.env.VITE_APP_VERSION as string | undefined) ?? '
 const envBuildTime = (import.meta.env.VITE_BUILD_TIME as string | undefined) ?? ''
 const envGitSha = (import.meta.env.VITE_GIT_SHA as string | undefined) ?? ''
 const envRepoUrl = (import.meta.env.VITE_REPO_URL as string | undefined) ?? ''
+const envDockerImage = (import.meta.env.VITE_DOCKER_IMAGE as string | undefined) ?? ''
 const appVersionText = computed(() => envVersion || __APP_VERSION__ || '')
 const buildTimeText = computed(() => envBuildTime || __BUILD_TIME__ || '')
 const gitShaText = computed(() => envGitSha || __GIT_SHA__ || '')
 const repoUrlText = computed(() => envRepoUrl || __REPO_URL__ || '')
+const dockerImageText = computed(() => envDockerImage || 'sqpp/shortwarden')
 
 const currentPassword = ref('')
 const newPassword = ref('')
@@ -33,6 +35,7 @@ const checkingUpdates = ref(false)
 const updateError = ref<string | null>(null)
 const latestVersion = ref<string>('')
 const updateAvailable = ref(false)
+const currentRuntimeVersion = ref<string>('')
 const runningUpdate = ref(false)
 const updateOutput = ref('')
 const updateRunError = ref<string | null>(null)
@@ -114,50 +117,60 @@ function isVersionNewer(current: string, latest: string) {
   return false
 }
 
-function parseRepo(url: string) {
-  const m = url.match(/github\.com\/([^/]+)\/([^/\s]+)/i)
-  if (!m) return null
-  return { owner: m[1], repo: m[2].replace(/\.git$/i, '') }
+function parseDockerImage(image: string) {
+  const parts = image.trim().split('/')
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null
+  return { namespace: parts[0], repo: parts[1] }
+}
+
+async function fetchLatestFromDockerHub(image: string) {
+  const parsed = parseDockerImage(image)
+  if (!parsed) throw new Error('Invalid Docker image name')
+  const res = await fetch(`https://hub.docker.com/v2/repositories/${parsed.namespace}/${parsed.repo}/tags?page_size=100`)
+  if (!res.ok) throw new Error(`Docker Hub error (${res.status})`)
+  const j = (await res.json()) as { results?: Array<{ name?: string }> }
+  const tags = (j.results ?? [])
+    .map((t) => (t.name || '').trim())
+    .filter((t) => /^v?\d+\.\d+\.\d+$/.test(t))
+  if (!tags.length) return ''
+  tags.sort((a, b) => (isVersionNewer(a, b) ? -1 : isVersionNewer(b, a) ? 1 : 0))
+  return tags[0] || ''
 }
 
 async function checkForUpdates() {
   updateError.value = null
   latestVersion.value = ''
   updateAvailable.value = false
-  if (!repoUrlText.value) {
-    updateError.value = 'Set VITE_REPO_URL first.'
-    return
-  }
-  const parsed = parseRepo(repoUrlText.value)
-  if (!parsed) {
-    updateError.value = 'Invalid GitHub repo URL.'
-    return
-  }
   checkingUpdates.value = true
   try {
-    // Prefer official releases, but fall back to tags when no release exists.
+    const res = await fetch('/v1/system/latest-version', { credentials: 'include' })
     let latest = ''
-    const releaseRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/releases/latest`)
-    if (releaseRes.ok) {
-      const j = (await releaseRes.json()) as { tag_name?: string; name?: string }
-      latest = (j.tag_name || j.name || '').trim()
-    } else if (releaseRes.status === 404) {
-      const tagsRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/tags?per_page=1`)
-      if (!tagsRes.ok) throw new Error(`Could not fetch latest tag (${tagsRes.status})`)
-      const tags = (await tagsRes.json()) as Array<{ name?: string }>
-      latest = (tags[0]?.name || '').trim()
-    } else if (releaseRes.status === 403) {
-      throw new Error('GitHub API rate limit reached. Try again later.')
+    if (res.ok) {
+      const j = (await res.json()) as { latest_version?: string }
+      latest = (j.latest_version || '').trim()
+    } else if (res.status === 404) {
+      latest = await fetchLatestFromDockerHub(dockerImageText.value)
     } else {
-      throw new Error(`Could not fetch latest release (${releaseRes.status})`)
+      throw new Error(await res.text())
     }
-    if (!latest) throw new Error('No release/tag found')
+    if (!latest) throw new Error('No Docker Hub semver tag found')
     latestVersion.value = latest
-    updateAvailable.value = isVersionNewer(appVersionText.value || '0.0.0', latest)
+    updateAvailable.value = isVersionNewer(currentRuntimeVersion.value || appVersionText.value || '0.0.0', latest)
   } catch (e) {
     updateError.value = e instanceof Error ? e.message : 'Failed checking updates'
   } finally {
     checkingUpdates.value = false
+  }
+}
+
+async function fetchRuntimeVersion() {
+  try {
+    const res = await fetch(`/v1/system/version?t=${Date.now()}`, { credentials: 'include', cache: 'no-store' })
+    if (!res.ok) return
+    const j = (await res.json()) as { app_version?: string }
+    currentRuntimeVersion.value = (j.app_version || '').trim()
+  } catch {
+    // ignore
   }
 }
 
@@ -203,7 +216,17 @@ async function runUpdateNow() {
   const timer = setInterval(async () => {
     try {
       await fetchUpdateStatus()
-      if (!runningUpdate.value) clearInterval(timer)
+      if (!runningUpdate.value) {
+        clearInterval(timer)
+        // API process restarted; runtime endpoint can lag briefly, retry a few times.
+        for (let i = 0; i < 10; i++) {
+          const before = currentRuntimeVersion.value
+          await fetchRuntimeVersion()
+          if (currentRuntimeVersion.value && currentRuntimeVersion.value !== before) break
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
+        await checkForUpdates()
+      }
     } catch {
       // ignore transient polling errors
     }
@@ -280,6 +303,7 @@ async function changePassword() {
 onMounted(() => {
   timezoneOptions.value = getTimezoneOptions()
   void loadSettings()
+  void fetchRuntimeVersion()
   void checkForUpdates()
   void fetchUpdateStatus()
 })
@@ -302,7 +326,7 @@ onMounted(() => {
           <div class="mt-3 grid gap-3 md:grid-cols-2">
             <div>
               <div class="text-xs uppercase tracking-wide text-slate-500">Version</div>
-              <div class="mt-1 text-sm text-slate-200">{{ appVersionText || '—' }}</div>
+              <div class="mt-1 text-sm text-slate-200">{{ currentRuntimeVersion || appVersionText || '—' }}</div>
             </div>
             <div>
               <div class="text-xs uppercase tracking-wide text-slate-500">Build</div>
@@ -331,7 +355,7 @@ onMounted(() => {
           <div class="mt-3 grid gap-3 md:grid-cols-2">
             <div>
               <div class="text-xs uppercase tracking-wide text-slate-500">Current</div>
-              <div class="mt-1 text-sm text-slate-200">{{ appVersionText || '—' }}</div>
+              <div class="mt-1 text-sm text-slate-200">{{ currentRuntimeVersion || appVersionText || '—' }}</div>
             </div>
             <div>
               <div class="text-xs uppercase tracking-wide text-slate-500">Latest</div>

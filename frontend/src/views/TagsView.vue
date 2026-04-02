@@ -4,11 +4,13 @@ import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
 
 type Tag = { name: string; link_count: number; curated?: boolean }
+type Domain = { hostname: string; default_tags?: string[] }
+type TagView = { name: string; link_count: number; curated?: boolean; domains: string[] }
 
 const auth = useAuthStore()
 const router = useRouter()
 
-const tags = ref<Tag[]>([])
+const tags = ref<TagView[]>([])
 const name = ref('')
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -17,9 +19,40 @@ async function fetchTags() {
   loading.value = true
   error.value = null
   try {
-    const res = await fetch('/v1/tags?limit=200&offset=0', { credentials: 'include' })
-    if (!res.ok) throw new Error(await res.text())
-    tags.value = (await res.json()) as Tag[]
+    const [tagsRes, domainsRes] = await Promise.all([
+      fetch('/v1/tags?limit=200&offset=0', { credentials: 'include' }),
+      fetch('/v1/domains?limit=200&offset=0', { credentials: 'include' }),
+    ])
+    if (!tagsRes.ok) throw new Error(await tagsRes.text())
+    if (!domainsRes.ok) throw new Error(await domainsRes.text())
+    const tagRows = (await tagsRes.json()) as Tag[]
+    const domainRows = (await domainsRes.json()) as Domain[]
+
+    const domainUsage = new Map<string, string[]>()
+    for (const d of domainRows) {
+      for (const raw of d.default_tags ?? []) {
+        const t = raw.trim()
+        if (!t) continue
+        const arr = domainUsage.get(t) ?? []
+        arr.push(d.hostname)
+        domainUsage.set(t, arr)
+      }
+    }
+
+    const byName = new Map<string, TagView>()
+    for (const t of tagRows) {
+      byName.set(t.name, {
+        name: t.name,
+        link_count: t.link_count,
+        curated: t.curated,
+        domains: domainUsage.get(t.name) ?? [],
+      })
+    }
+    for (const [name, domainsUsing] of domainUsage.entries()) {
+      if (byName.has(name)) continue
+      byName.set(name, { name, link_count: 0, curated: false, domains: domainsUsing })
+    }
+    tags.value = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed'
   } finally {
@@ -103,6 +136,7 @@ onMounted(fetchTags)
           <button class="min-w-0 text-left" @click="openTag(t.name)">
             <div class="truncate text-sm font-medium">{{ t.name }}</div>
             <div class="text-xs text-slate-400">{{ t.link_count }} links</div>
+            <div v-if="t.domains.length" class="truncate text-xs text-slate-500">Domains: {{ t.domains.join(', ') }}</div>
           </button>
           <button class="sw-btn sw-btn-danger px-2 py-1 text-xs" @click="deleteTag(t.name)">
             Delete

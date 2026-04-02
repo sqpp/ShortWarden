@@ -19,10 +19,14 @@ func NewServer(cfg config.Config, db *pgxpool.Pool) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
+	// Screenshot preview proxy can take ~25s (headless Chromium); keep headroom.
+	r.Use(middleware.Timeout(55 * time.Second))
 
 	h := NewHandler(cfg, db)
 	r.Use(authMiddleware(authDeps{db: db, q: h.q, jwt: h.jwt}))
+
+	// Public image proxy for redirect interstitials (browser must not use internal Docker hostnames).
+	r.Get("/preview/screenshot", h.ScreenshotPreview)
 
 	openapiYAML, err := os.ReadFile("api/openapi.yaml")
 	if err != nil {
@@ -44,6 +48,10 @@ func NewServer(cfg config.Config, db *pgxpool.Pool) http.Handler {
 	// Non-OpenAPI internal system endpoints (authenticated + CSRF protected in handlers).
 	r.Post("/v1/system/update", h.TriggerUpdate)
 	r.Get("/v1/system/update", h.GetUpdateStatus)
+	r.Get("/v1/system/version", h.GetSystemVersion)
+	r.Get("/v1/system/latest-version", h.GetLatestVersion)
+	r.Get("/v1/me/redirect-customization", h.GetRedirectCustomization)
+	r.Patch("/v1/me/redirect-customization", h.UpdateRedirectCustomization)
 
 	return r
 }

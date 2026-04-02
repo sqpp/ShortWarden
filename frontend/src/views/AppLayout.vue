@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { Lineicons } from '@lineiconshq/vue-lineicons'
@@ -24,8 +24,11 @@ const auth = useAuthStore()
 const route = useRoute()
 const envVersion = (import.meta.env.VITE_APP_VERSION as string | undefined) ?? ''
 const envRepoUrl = (import.meta.env.VITE_REPO_URL as string | undefined) ?? ''
+const envDockerImage = (import.meta.env.VITE_DOCKER_IMAGE as string | undefined) ?? ''
 const appVersionText = computed(() => envVersion || __APP_VERSION__ || '')
 const repoUrlText = computed(() => envRepoUrl || __REPO_URL__ || '')
+const dockerImageText = computed(() => envDockerImage || 'sqpp/shortwarden')
+const currentRuntimeVersion = ref<string>('')
 
 type Domain = { id: string; hostname: string; status: 'pending' | 'verified'; is_primary?: boolean }
 
@@ -70,6 +73,7 @@ const navSections = computed<NavSection[]>(() => [
     title: 'Tools',
     items: [
       { to: '/app/import-export', label: 'Export/import', icon: ExitUpOutlined },
+      { to: '/app/customization', label: 'Customization', icon: Gear1Outlined },
       { to: '/app/settings', label: 'Settings', icon: Gear1Outlined },
     ],
   },
@@ -98,33 +102,50 @@ function isVersionNewer(current: string, latest: string) {
   return false
 }
 
-function parseRepo(url: string) {
-  const m = url.match(/github\.com\/([^/]+)\/([^/\s]+)/i)
-  if (!m) return null
-  return { owner: m[1], repo: m[2].replace(/\.git$/i, '') }
+function parseDockerImage(image: string) {
+  const parts = image.trim().split('/')
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null
+  return { namespace: parts[0], repo: parts[1] }
+}
+
+async function fetchLatestFromDockerHub(image: string) {
+  const parsed = parseDockerImage(image)
+  if (!parsed) return ''
+  const res = await fetch(`https://hub.docker.com/v2/repositories/${parsed.namespace}/${parsed.repo}/tags?page_size=100`)
+  if (!res.ok) return ''
+  const j = (await res.json()) as { results?: Array<{ name?: string }> }
+  const tags = (j.results ?? [])
+    .map((t) => (t.name || '').trim())
+    .filter((t) => /^v?\d+\.\d+\.\d+$/.test(t))
+  if (!tags.length) return ''
+  tags.sort((a, b) => (isVersionNewer(a, b) ? -1 : isVersionNewer(b, a) ? 1 : 0))
+  return tags[0] || ''
 }
 
 async function checkForUpdates() {
-  if (!repoUrlText.value) return
-  const parsed = parseRepo(repoUrlText.value)
-  if (!parsed) return
   try {
+    const res = await fetch('/v1/system/latest-version', { credentials: 'include' })
     let latest = ''
-    const releaseRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/releases/latest`)
-    if (releaseRes.ok) {
-      const j = (await releaseRes.json()) as { tag_name?: string; name?: string }
-      latest = (j.tag_name || j.name || '').trim()
-    } else if (releaseRes.status === 404) {
-      const tagsRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/tags?per_page=1`)
-      if (!tagsRes.ok) return
-      const tags = (await tagsRes.json()) as Array<{ name?: string }> 
-      latest = (tags[0]?.name || '').trim()
-    } else {
-      return
+    if (res.ok) {
+      const j = (await res.json()) as { latest_version?: string }
+      latest = (j.latest_version || '').trim()
+    } else if (res.status === 404) {
+      latest = await fetchLatestFromDockerHub(dockerImageText.value)
     }
     if (!latest) return
     latestVersion.value = latest
-    updateAvailable.value = isVersionNewer(appVersionText.value || '0.0.0', latest)
+    updateAvailable.value = isVersionNewer(currentRuntimeVersion.value || appVersionText.value || '0.0.0', latest)
+  } catch {
+    // ignore
+  }
+}
+
+async function fetchRuntimeVersion() {
+  try {
+    const res = await fetch(`/v1/system/version?t=${Date.now()}`, { credentials: 'include', cache: 'no-store' })
+    if (!res.ok) return
+    const j = (await res.json()) as { app_version?: string }
+    currentRuntimeVersion.value = (j.app_version || '').trim()
   } catch {
     // ignore
   }
@@ -139,6 +160,42 @@ const newLinkExpiryPreset = ref<string>('')
 const newLinkExpiresCustom = ref<string>('')
 const newLinkLoading = ref(false)
 const newLinkError = ref<string | null>(null)
+/** After a successful create we stay on an explicit success step (avoids v-if edge cases with empty URL). */
+const newLinkStep = ref<'form' | 'success'>('form')
+const newLinkCreatedUrl = ref<string | null>(null)
+const newLinkCreatedInput = ref<HTMLInputElement | null>(null)
+const newLinkCopyHint = ref('')
+
+function pickString(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+/** Resolve short URL from POST /v1/links body (handles odd JSON shapes / proxies). */
+function shortUrlFromCreateResponse(
+  raw: string,
+  selectedDomainId: string,
+  domains: Domain[],
+): string {
+  let j: Record<string, unknown> = {}
+  try {
+    if (raw) j = JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return ''
+  }
+  const direct =
+    pickString(j.short_url) ||
+    pickString(j.ShortUrl) ||
+    pickString(j.shortUrl)
+  if (direct) return direct
+  const alias = pickString(j.alias) || pickString(j.Alias)
+  if (!alias) return ''
+  const did = pickString(j.domain_id) || pickString(j.DomainId) || selectedDomainId
+  const host = domains.find((d) => d.id === did)?.hostname
+  if (host) {
+    return `${window.location.protocol}//${host}/r/${alias}`
+  }
+  return `${window.location.origin}/r/${alias}`
+}
 
 async function fetchNewLinkDomains() {
   try {
@@ -188,9 +245,75 @@ function computeNewLinkExpiresISO() {
   }
 }
 
+/** Call only from a click/key handler so the browser allows clipboard access. */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // fall through
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
+async function copyCreatedUrl() {
+  const text = newLinkCreatedUrl.value
+  if (!text) return
+  newLinkCopyHint.value = ''
+  const ok = await copyTextToClipboard(text)
+  newLinkCopyHint.value = ok ? 'Copied.' : 'Could not copy — select the text above and press Ctrl+C.'
+  if (ok) {
+    window.setTimeout(() => {
+      if (newLinkCopyHint.value === 'Copied.') newLinkCopyHint.value = ''
+    }, 2000)
+  }
+}
+
+function closeNewLinkModal() {
+  newLinkOpen.value = false
+  newLinkStep.value = 'form'
+  newLinkCreatedUrl.value = null
+  newLinkCopyHint.value = ''
+}
+
+watch([newLinkStep, newLinkCreatedUrl], async ([step, url]) => {
+  if (step !== 'success' || !url) return
+  await nextTick()
+  const el = newLinkCreatedInput.value
+  el?.focus()
+  el?.select()
+  // Best-effort; may fail without a fresh click — Copy button is the reliable path.
+  const ok = await copyTextToClipboard(url)
+  if (ok) {
+    newLinkCopyHint.value = 'Copied to clipboard.'
+    window.setTimeout(() => {
+      if (newLinkCopyHint.value === 'Copied to clipboard.') newLinkCopyHint.value = ''
+    }, 2500)
+  }
+})
+
 async function createNewLink() {
   if (!auth.csrf) await auth.bootstrap()
-  if (!auth.csrf) return
+  if (!auth.csrf) {
+    newLinkError.value = 'Session token missing. Refresh and try again.'
+    return
+  }
 
   newLinkLoading.value = true
   newLinkError.value = null
@@ -207,12 +330,22 @@ async function createNewLink() {
         expires_at,
       }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    const raw = await res.text()
+    if (!res.ok) throw new Error(raw || `Failed (${res.status})`)
+    const domainIdSnapshot = newLinkDomainId.value
+    const shortUrl = shortUrlFromCreateResponse(raw, domainIdSnapshot, newLinkDomains.value)
     newLinkTargetUrl.value = ''
     newLinkAlias.value = ''
     newLinkExpiryPreset.value = ''
     newLinkExpiresCustom.value = ''
-    newLinkOpen.value = false
+    newLinkOpen.value = true
+    newLinkCreatedUrl.value = shortUrl || null
+    newLinkStep.value = 'success'
+    newLinkError.value = null
+    if (!newLinkCreatedUrl.value) {
+      newLinkCopyHint.value =
+        'Link was created but no short URL was parsed. Open Links and use Copy there, or check the API response in DevTools.'
+    }
   } catch (e) {
     newLinkError.value = e instanceof Error ? e.message : 'Failed'
   } finally {
@@ -222,12 +355,16 @@ async function createNewLink() {
 
 function openNewLink() {
   newLinkOpen.value = true
+  newLinkStep.value = 'form'
   newLinkError.value = null
+  newLinkCreatedUrl.value = null
+  newLinkCopyHint.value = ''
   void fetchNewLinkDomains()
 }
 
 onMounted(() => {
   void fetchNewLinkDomains()
+  void fetchRuntimeVersion()
   void checkForUpdates()
 })
 </script>
@@ -318,20 +455,51 @@ onMounted(() => {
   <div
     v-if="newLinkOpen"
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
-    @keydown.esc="newLinkOpen = false"
+    @keydown.esc="closeNewLinkModal"
   >
     <div class="w-full max-w-2xl">
       <div class="sw-card">
         <div class="sw-card-header flex items-center justify-between">
-          <div>Create a new link</div>
-          <button class="sw-icon-btn" title="Close" @click="newLinkOpen = false">
+          <div>{{ newLinkStep === 'success' ? 'Link created' : 'Create a new link' }}</div>
+          <button type="button" class="sw-icon-btn" title="Close" @click="closeNewLinkModal">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 6 6 18" />
               <path d="M6 6l12 12" />
             </svg>
           </button>
         </div>
-        <div class="sw-card-body space-y-4">
+        <div v-if="newLinkStep === 'success'" class="sw-card-body space-y-4">
+          <p class="text-sm text-slate-300">
+            Your short link is below. Use
+            <span class="text-slate-200">Copy to clipboard</span>
+            if it was not copied automatically.
+          </p>
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+            <input
+              ref="newLinkCreatedInput"
+              readonly
+              class="sw-input min-w-0 flex-1 font-mono text-sm"
+              :value="newLinkCreatedUrl || '(see Links page)'"
+              :disabled="!newLinkCreatedUrl"
+              @click="newLinkCreatedInput?.select()"
+            />
+            <button
+              type="button"
+              class="sw-btn sw-btn-primary shrink-0 px-4"
+              :disabled="!newLinkCreatedUrl"
+              @click="copyCreatedUrl"
+            >
+              Copy to clipboard
+            </button>
+          </div>
+          <p v-if="newLinkCopyHint" class="text-sm" :class="newLinkCopyHint.startsWith('Copied') ? 'text-lime-300' : 'text-amber-200'">
+            {{ newLinkCopyHint }}
+          </p>
+          <div class="flex justify-end">
+            <button type="button" class="sw-btn" @click="closeNewLinkModal">Done</button>
+          </div>
+        </div>
+        <div v-else class="sw-card-body space-y-4">
           <div class="grid gap-3 md:grid-cols-3">
             <div class="md:col-span-2">
               <label class="sw-label">Target URL</label>
@@ -378,8 +546,8 @@ onMounted(() => {
           <div class="flex items-center justify-between gap-3">
             <div v-if="newLinkError" class="text-sm text-red-200">{{ newLinkError }}</div>
             <div class="flex items-center gap-2">
-              <button class="sw-btn" :disabled="newLinkLoading" @click="newLinkOpen = false">Cancel</button>
-              <button class="sw-btn sw-btn-primary" :disabled="newLinkLoading" @click="createNewLink">
+              <button type="button" class="sw-btn" :disabled="newLinkLoading" @click="closeNewLinkModal">Cancel</button>
+              <button type="button" class="sw-btn sw-btn-primary" :disabled="newLinkLoading" @click="createNewLink">
                 {{ newLinkLoading ? 'Creating…' : 'Create link' }}
               </button>
             </div>

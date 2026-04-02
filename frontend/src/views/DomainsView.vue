@@ -18,6 +18,8 @@ const error = ref<string | null>(null)
 const loading = ref(false)
 const limit = ref(25)
 const offset = ref(0)
+const defaultTagDraft = ref<Record<string, string>>({})
+const savingDefaultTags = ref<Record<string, boolean>>({})
 
 async function fetchDomains() {
   loading.value = true
@@ -26,6 +28,9 @@ async function fetchDomains() {
     const res = await fetch(`/v1/domains?limit=${limit.value}&offset=${offset.value}`, { credentials: 'include' })
     if (!res.ok) throw new Error(await res.text())
     domains.value = (await res.json()) as Domain[]
+    for (const d of domains.value) {
+      if (!(d.id in defaultTagDraft.value)) defaultTagDraft.value[d.id] = ''
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed'
   } finally {
@@ -115,16 +120,12 @@ async function removeDomain(id: string) {
   }
 }
 
-async function saveDefaultTags(d: Domain, raw: string) {
+async function saveDefaultTags(d: Domain, tags: string[]) {
   if (!auth.csrf) await auth.bootstrap()
   if (!auth.csrf) return
-  loading.value = true
+  savingDefaultTags.value[d.id] = true
   error.value = null
   try {
-    const tags = raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
     const res = await fetch(`/v1/domains/${d.id}/default-tags`, {
       method: 'PUT',
       credentials: 'include',
@@ -132,12 +133,45 @@ async function saveDefaultTags(d: Domain, raw: string) {
       body: JSON.stringify(tags),
     })
     if (!res.ok) throw new Error(await res.text())
-    await fetchDomains()
+    let nextTags = tags
+    try {
+      const j = (await res.json()) as { default_tags?: string[] }
+      if (Array.isArray(j.default_tags)) nextTags = j.default_tags
+    } catch {
+      // ignore response parse errors; keep optimistic tags
+    }
+    domains.value = domains.value.map((x) => (x.id === d.id ? { ...x, default_tags: nextTags } : x))
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed'
   } finally {
-    loading.value = false
+    savingDefaultTags.value[d.id] = false
   }
+}
+
+function normalizedDomainTags(d: Domain) {
+  return (d.default_tags ?? []).map((t) => t.trim()).filter(Boolean)
+}
+
+async function addDefaultTag(d: Domain) {
+  const raw = (defaultTagDraft.value[d.id] ?? '').trim()
+  if (!raw) return
+  const current = normalizedDomainTags(d)
+  if (current.length >= 5) {
+    error.value = 'Maximum 5 default tags per domain.'
+    return
+  }
+  if (current.includes(raw)) {
+    defaultTagDraft.value[d.id] = ''
+    return
+  }
+  const next = [...current, raw].slice(0, 5)
+  defaultTagDraft.value[d.id] = ''
+  await saveDefaultTags(d, next)
+}
+
+async function removeDefaultTag(d: Domain, tag: string) {
+  const next = normalizedDomainTags(d).filter((t) => t !== tag)
+  await saveDefaultTags(d, next)
 }
 
 function nextPage() {
@@ -234,11 +268,36 @@ onMounted(fetchDomains)
                 <code class="rounded border border-white/10 bg-[#1c1f2a] px-2 py-1 text-xs text-slate-200">{{ d.dns_token }}</code>
               </td>
               <td class="py-3">
-                <input
-                  class="sw-input px-2 py-1 text-xs"
-                  :value="(d.default_tags ?? []).join(', ')"
-                  @change="saveDefaultTags(d, ($event.target as HTMLInputElement).value)"
-                />
+                <div class="space-y-2">
+                  <div class="flex flex-wrap gap-2">
+                    <span
+                      v-for="tag in normalizedDomainTags(d)"
+                      :key="`${d.id}:${tag}`"
+                      class="inline-flex items-center gap-1 rounded-full border border-lime-400/25 bg-lime-400/10 px-2 py-0.5 text-xs text-lime-200"
+                    >
+                      {{ tag }}
+                      <button class="text-lime-100/80 hover:text-white" @click="removeDefaultTag(d, tag)">x</button>
+                    </span>
+                    <span v-if="!normalizedDomainTags(d).length" class="text-xs text-slate-400">No default tags</span>
+                  </div>
+                  <div class="flex gap-2">
+                    <input
+                      v-model="defaultTagDraft[d.id]"
+                      class="sw-input px-2 py-1 text-xs"
+                      placeholder="Add tag"
+                      :disabled="savingDefaultTags[d.id] || normalizedDomainTags(d).length >= 5"
+                      @keydown.enter.prevent="addDefaultTag(d)"
+                    />
+                    <button
+                      class="sw-btn px-2 py-1 text-xs"
+                      :disabled="savingDefaultTags[d.id] || normalizedDomainTags(d).length >= 5"
+                      @click="addDefaultTag(d)"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <div class="text-[11px] text-slate-500">{{ normalizedDomainTags(d).length }}/5</div>
+                </div>
               </td>
               <td class="py-3 pr-5">
                 <div class="flex justify-end gap-2">

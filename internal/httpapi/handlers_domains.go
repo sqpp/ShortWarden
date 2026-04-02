@@ -21,6 +21,11 @@ import (
 
 const dnsChallengePrefix = "_shortwarden-challenge."
 
+type domainAPIWithDefaultTags struct {
+	genapi.Domain
+	DefaultTags []string `json:"default_tags"`
+}
+
 func (h *Handler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 	if !requireCookieCSRF(w, r) {
 		return
@@ -93,9 +98,9 @@ func (h *Handler) ListDomains(w http.ResponseWriter, r *http.Request, params gen
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	out := make([]genapi.Domain, 0, len(rows))
+	out := make([]domainAPIWithDefaultTags, 0, len(rows))
 	for _, d := range rows {
-		out = append(out, domainToAPI(d))
+		out = append(out, domainToAPIWithDefaultTags(d))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -258,7 +263,7 @@ func (h *Handler) ReplaceDomainDefaultTags(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	writeJSON(w, http.StatusOK, domainToAPI(updated))
+	writeJSON(w, http.StatusOK, domainToAPIWithDefaultTags(updated))
 }
 
 func domainToAPI(d store.Domain) genapi.Domain {
@@ -279,6 +284,14 @@ func domainToAPI(d store.Domain) genapi.Domain {
 		DnsToken:   d.DnsToken,
 		CreatedAt:  d.CreatedAt.Time,
 		VerifiedAt: verifiedAt,
+	}
+}
+
+func domainToAPIWithDefaultTags(d store.Domain) domainAPIWithDefaultTags {
+	base := domainToAPI(d)
+	return domainAPIWithDefaultTags{
+		Domain:      base,
+		DefaultTags: d.DefaultTags,
 	}
 }
 

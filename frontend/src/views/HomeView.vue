@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 
 type Stats = { links_total: number; clicks_total: number; clicks_24h: number; clicks_7d: number }
@@ -7,21 +7,18 @@ type Domain = { id: string; hostname: string; status: 'pending' | 'verified'; is
 
 const auth = useAuthStore()
 
-type RecentClick = {
-  id: number
-  clicked_at: string
-  link_id: string
-  alias: string
-  short_url?: string | null
-  referrer?: string | null
-  country?: string | null
-  device?: string | null
-}
 type TopLink = { link: { id: string; alias: string; short_url?: string | null; target_url: string }; clicks: number }
+type ListedLink = {
+  id: string
+  alias: string
+  target_url: string
+  short_url?: string | null
+  created_at: string
+}
 
 const stats = ref<Stats | null>(null)
 const statsError = ref<string | null>(null)
-const recentClicks = ref<RecentClick[]>([])
+const recentLinks = ref<ListedLink[]>([])
 const topLinks = ref<TopLink[]>([])
 const homeError = ref<string | null>(null)
 
@@ -35,6 +32,91 @@ const expiresCustom = ref<string>('')
 
 const loading = ref(false)
 const error = ref<string | null>(null)
+const createSuccess = ref(false)
+const createdShortUrl = ref<string | null>(null)
+const createdUrlInput = ref<HTMLInputElement | null>(null)
+const copyHint = ref('')
+
+function pickStr(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+function shortUrlFromCreateBody(raw: string, selectedDomainId: string, domainList: Domain[]): string {
+  let j: Record<string, unknown> = {}
+  try {
+    if (raw) j = JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return ''
+  }
+  const direct = pickStr(j.short_url) || pickStr(j.ShortUrl) || pickStr(j.shortUrl)
+  if (direct) return direct
+  const al = pickStr(j.alias) || pickStr(j.Alias)
+  if (!al) return ''
+  const did = pickStr(j.domain_id) || pickStr(j.DomainId) || selectedDomainId
+  const host = domainList.find((d) => d.id === did)?.hostname
+  if (host) return `${window.location.protocol}//${host}/r/${al}`
+  return `${window.location.origin}/r/${al}`
+}
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // fall through
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
+async function copyCreatedUrl() {
+  const t = createdShortUrl.value
+  if (!t) return
+  copyHint.value = ''
+  const ok = await copyTextToClipboard(t)
+  copyHint.value = ok ? 'Copied.' : 'Select the text and press Ctrl+C.'
+  if (ok) {
+    window.setTimeout(() => {
+      if (copyHint.value === 'Copied.') copyHint.value = ''
+    }, 2000)
+  }
+}
+
+function dismissCreated() {
+  createSuccess.value = false
+  createdShortUrl.value = null
+  copyHint.value = ''
+}
+
+watch([createSuccess, createdShortUrl], async ([ok, url]) => {
+  if (!ok || !url) return
+  await nextTick()
+  const el = createdUrlInput.value
+  el?.focus()
+  el?.select()
+  const copied = await copyTextToClipboard(url)
+  if (copied) {
+    copyHint.value = 'Copied to clipboard.'
+    window.setTimeout(() => {
+      if (copyHint.value === 'Copied to clipboard.') copyHint.value = ''
+    }, 2500)
+  }
+})
 
 function computeExpiresISO() {
   if (!expiryPreset.value) return undefined
@@ -97,12 +179,19 @@ async function fetchDomains() {
 
 async function createLink() {
   if (!auth.csrf) await auth.bootstrap()
-  if (!auth.csrf) return
+  if (!auth.csrf) {
+    error.value = 'Session not ready. Refresh and try again.'
+    return
+  }
 
   loading.value = true
   error.value = null
+  createSuccess.value = false
+  createdShortUrl.value = null
+  copyHint.value = ''
   try {
     const expires_at = computeExpiresISO()
+    const domainSnap = domainId.value
     const res = await fetch('/v1/links', {
       method: 'POST',
       credentials: 'include',
@@ -114,13 +203,19 @@ async function createLink() {
         expires_at,
       }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    const raw = await res.text()
+    if (!res.ok) throw new Error(raw || `Failed (${res.status})`)
+    const shortUrl = shortUrlFromCreateBody(raw, domainSnap, domains.value)
     targetUrl.value = ''
     alias.value = ''
-    domainId.value = ''
     expiryPreset.value = ''
     expiresCustom.value = ''
-    await fetchStats()
+    createSuccess.value = true
+    createdShortUrl.value = shortUrl || null
+    if (!createdShortUrl.value) {
+      copyHint.value = 'Link created. See Recent links on the right for the short URL.'
+    }
+    await Promise.all([fetchStats(), fetchRecentLinks(), fetchHomePanels()])
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed'
   } finally {
@@ -128,25 +223,36 @@ async function createLink() {
   }
 }
 
+async function fetchRecentLinks() {
+  try {
+    const res = await fetch('/v1/links?limit=5&offset=0', { credentials: 'include' })
+    if (!res.ok) return
+    recentLinks.value = (await res.json()) as ListedLink[]
+  } catch {
+    // ignore
+  }
+}
+
 async function fetchHomePanels() {
   homeError.value = null
   try {
-    const [rc, tl] = await Promise.all([
-      fetch('/v1/home/recent-clicks?limit=50', { credentials: 'include' }),
-      fetch('/v1/home/top-links?limit=10&days=7', { credentials: 'include' }),
-    ])
-    if (!rc.ok) throw new Error(await rc.text())
+    const tl = await fetch('/v1/home/top-links?limit=10&days=7', { credentials: 'include' })
     if (!tl.ok) throw new Error(await tl.text())
-    recentClicks.value = (await rc.json()) as RecentClick[]
     topLinks.value = (await tl.json()) as TopLink[]
   } catch (e) {
     homeError.value = e instanceof Error ? e.message : 'Failed'
   }
 }
 
+function refreshHomeWidgets() {
+  void fetchHomePanels()
+  void fetchRecentLinks()
+}
+
 onMounted(() => {
   void fetchStats()
   void fetchHomePanels()
+  void fetchRecentLinks()
   void fetchDomains()
 })
 </script>
@@ -159,7 +265,7 @@ onMounted(() => {
         <p class="sw-subtitle">Create links, monitor activity, and review performance.</p>
       </div>
       <div class="flex items-center gap-2">
-        <button class="sw-btn" :disabled="loading" @click="fetchHomePanels">Refresh</button>
+        <button class="sw-btn" :disabled="loading" @click="refreshHomeWidgets">Refresh</button>
         <button class="sw-btn" :disabled="loading" @click="fetchStats">Refresh stats</button>
       </div>
     </div>
@@ -297,9 +403,39 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="flex items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
           <div v-if="error" class="text-sm text-red-200">{{ error }}</div>
-          <button class="sw-btn sw-btn-primary" :disabled="loading" @click="createLink">Create link</button>
+          <button type="button" class="sw-btn sw-btn-primary" :disabled="loading" @click="createLink">
+            {{ loading ? 'Creating…' : 'Create link' }}
+          </button>
+        </div>
+
+        <div
+          v-if="createSuccess"
+          class="space-y-3 rounded-xl border border-lime-400/25 bg-lime-400/10 p-4 ring-1 ring-inset ring-lime-400/15"
+        >
+          <div class="text-sm font-semibold text-lime-200">Link created</div>
+          <template v-if="createdShortUrl">
+            <p class="text-sm text-slate-300">Your short URL is below. Use Copy if it was not copied automatically.</p>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+              <input
+                ref="createdUrlInput"
+                readonly
+                class="sw-input min-w-0 flex-1 font-mono text-sm"
+                :value="createdShortUrl"
+                @click="createdUrlInput?.select()"
+              />
+              <button type="button" class="sw-btn sw-btn-primary shrink-0 px-4" @click="copyCreatedUrl">Copy</button>
+              <button type="button" class="sw-btn shrink-0" @click="dismissCreated">Dismiss</button>
+            </div>
+          </template>
+          <template v-else>
+            <p class="text-sm text-slate-300">The link was created. Open <strong class="text-slate-200">Recent links</strong> for the short URL.</p>
+            <button type="button" class="sw-btn" @click="dismissCreated">Dismiss</button>
+          </template>
+          <p v-if="copyHint" class="text-sm" :class="copyHint.startsWith('Copied') ? 'text-lime-300' : 'text-amber-200'">
+            {{ copyHint }}
+          </p>
         </div>
       </div>
     </div>
@@ -338,34 +474,36 @@ onMounted(() => {
       </div>
 
       <div class="sw-card">
-        <div class="sw-card-header">Recent clicks</div>
+        <div class="sw-card-header">Recent links</div>
         <div class="sw-card-body">
           <div class="overflow-auto">
             <table class="sw-table">
               <thead class="sw-thead">
                 <tr>
-                  <th class="py-2">Time</th>
-                  <th class="py-2">Link</th>
-                  <th class="py-2">Referrer</th>
+                  <th class="py-2">Short link</th>
+                  <th class="py-2">Target</th>
+                  <th class="py-2">Created</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="c in recentClicks" :key="c.id" class="sw-row">
-                  <td class="py-2 whitespace-nowrap text-slate-300">{{ new Date(c.clicked_at).toLocaleString() }}</td>
+                <tr v-for="l in recentLinks" :key="l.id" class="sw-row">
                   <td class="py-2">
-                    <a class="hover:underline" :href="c.short_url ?? ('/r/' + c.alias)" target="_blank" rel="noreferrer">
-                      {{ c.short_url ?? ('/r/' + c.alias) }}
+                    <a
+                      class="font-medium hover:underline sw-accent"
+                      :href="l.short_url ?? '/r/' + l.alias"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {{ l.short_url ?? '/r/' + l.alias }}
                     </a>
-                    <div class="mt-1 text-xs text-slate-400">
-                      <span v-if="c.country">{{ c.country }}</span>
-                      <span v-if="c.country && c.device"> • </span>
-                      <span v-if="c.device">{{ c.device }}</span>
-                    </div>
                   </td>
-                  <td class="py-2 truncate max-w-[16rem] text-slate-300">{{ c.referrer ?? '-' }}</td>
+                  <td class="py-2 max-w-[14rem] truncate text-slate-400" :title="l.target_url">{{ l.target_url }}</td>
+                  <td class="py-2 whitespace-nowrap text-sm text-slate-400">
+                    {{ new Date(l.created_at).toLocaleString() }}
+                  </td>
                 </tr>
-                <tr v-if="!recentClicks.length">
-                  <td class="py-3 text-sm text-slate-400" colspan="3">No clicks yet.</td>
+                <tr v-if="!recentLinks.length">
+                  <td class="py-3 text-sm text-slate-400" colspan="3">No links yet.</td>
                 </tr>
               </tbody>
             </table>

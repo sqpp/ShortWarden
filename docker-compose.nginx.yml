@@ -14,23 +14,40 @@ services:
     volumes:
       - shortwarden_pgdata:/var/lib/postgresql/data
 
-  api:
+  screenshot:
     build:
       context: .
-      dockerfile: ./Dockerfile.api
+      dockerfile: Dockerfile.screenshot
+    expose:
+      - "8088"
+    environment:
+      SCREENSHOTD_HTTP_ADDR: ":8088"
+
+  api:
+    image: sqpp/shortwarden:latest
+    user: "0:0"
     environment:
       SHORTWARDEN_HTTP_ADDR: ":8080"
+      SHORTWARDEN_DOCKER_IMAGE: "sqpp/shortwarden"
+      SHORTWARDEN_COMPOSE_PROJECT_NAME: "shortwarden"
       SHORTWARDEN_POSTGRES_DSN: "postgres://shortwarden:shortwarden@db:5432/shortwarden?sslmode=disable"
       SHORTWARDEN_JWT_SECRET: "change-me"
       SHORTWARDEN_PUBLIC_BASE_URL: "http://brohosting.space"
+      # Internal screenshotd (see screenshot service). Browsers use /preview/screenshot on the public host.
+      SHORTWARDEN_SCREENSHOT_SERVICE_URL: "http://screenshot:8088"
       SHORTWARDEN_COOKIE_SECURE: "0"
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    ports:
-      - "8080:8080"
+      screenshot:
+        condition: service_started
+    expose:
+      - "8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/workspace
 
   migrate:
     build:
